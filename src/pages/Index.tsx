@@ -4,8 +4,13 @@ import { TradingChart } from "@/components/trading/TradingChart";
 import { PositionsTable } from "@/components/trading/PositionsTable";
 import { ActiveBots } from "@/components/trading/ActiveBots";
 import { EquityCurve } from "@/components/trading/EquityCurve";
+import { useAnalytics } from "@/hooks/api/useAnalytics";
+import { useRiskStatus } from "@/hooks/api/useRisk";
 
 const Dashboard = () => {
+  const { data: perf } = useAnalytics();
+  const { data: riskStatus } = useRiskStatus();
+
   return (
     <div className="space-y-6 animate-slide-up">
       <div>
@@ -13,15 +18,37 @@ const Dashboard = () => {
         <p className="text-sm text-muted-foreground">Real-time trading overview</p>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Portfolio Value" value="$12,845.90" change="+$1,845.90 (16.8%)" changeType="profit" icon={DollarSign} />
-        <StatCard label="Today's P&L" value="+$64.76" change="+0.51%" changeType="profit" icon={TrendingUp} />
-        <StatCard label="Win Rate" value="62.4%" change="+2.1% vs last month" changeType="profit" icon={BarChart3} />
-        <StatCard label="Risk Exposure" value="34.2%" change="Within limits" changeType="neutral" icon={Shield} />
+        <StatCard
+          label="Portfolio Value"
+          value={perf ? `$${perf.totalReturn.toLocaleString()}` : '—'}
+          change={perf ? `${perf.totalReturnPercent >= 0 ? '+' : ''}${perf.totalReturnPercent.toFixed(1)}%` : '—'}
+          changeType={perf && perf.totalReturnPercent >= 0 ? "profit" : "loss"}
+          icon={DollarSign}
+        />
+        <StatCard
+          label="Total Trades"
+          value={perf ? String(perf.totalTrades) : '—'}
+          change={perf ? `${perf.winRate.toFixed(1)}% win rate` : '—'}
+          changeType="neutral"
+          icon={TrendingUp}
+        />
+        <StatCard
+          label="Win Rate"
+          value={perf ? `${perf.winRate.toFixed(1)}%` : '—'}
+          change={perf ? `Sharpe: ${perf.sharpeRatio.toFixed(2)}` : '—'}
+          changeType="profit"
+          icon={BarChart3}
+        />
+        <StatCard
+          label="Risk Exposure"
+          value={riskStatus ? `${riskStatus.totalExposure.toFixed(1)}%` : '—'}
+          change={riskStatus ? (riskStatus.allChecksPassed ? 'Within limits' : `${riskStatus.violations.length} violations`) : '—'}
+          changeType={riskStatus?.allChecksPassed ? "neutral" : "loss"}
+          icon={Shield}
+        />
       </div>
 
-      {/* Chart + Bots */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="xl:col-span-2">
           <TradingChart />
@@ -31,7 +58,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Equity + Positions */}
       <EquityCurve />
       <PositionsTable />
     </div>

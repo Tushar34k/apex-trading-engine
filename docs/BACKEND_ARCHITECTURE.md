@@ -9,7 +9,11 @@
 6. [Execution Engine](#execution-engine)
 7. [Backtesting Engine](#backtesting-engine)
 8. [WebSocket Configuration](#websocket)
-9. [Docker Configuration](#docker)
+9. [WebSocket Event Schemas](#websocket-events)
+10. [Exchange Integration](#exchange-integration)
+11. [Order Reconciliation](#reconciliation)
+12. [Security & Auth](#security)
+13. [Docker Configuration](#docker)
 
 ---
 
@@ -641,7 +645,264 @@ public class MarketDataPublisher {
 
 ---
 
-## 9. Docker Configuration <a name="docker"></a>
+## 9. WebSocket Event Schemas <a name="websocket-events"></a>
+
+All events sent over STOMP include a `type` field for client-side routing.
+
+### Price Update (`/topic/market/{symbol}`)
+```json
+{
+  "type": "PRICE_UPDATE",
+  "symbol": "BTCUSDT",
+  "price": 67432.50,
+  "change24h": 2.34,
+  "timestamp": 1709312400000
+}
+```
+
+### Trade Opened (`/user/topic/trades`)
+```json
+{
+  "type": "TRADE_OPENED",
+  "trade": {
+    "id": "uuid", "symbol": "BTC/USDT", "side": "LONG",
+    "entryPrice": 67000, "quantity": 0.15, "stopLoss": 65200, "takeProfit": 69500,
+    "status": "OPEN", "openedAt": "2025-03-01T10:00:00Z"
+  },
+  "explanation": {
+    "strategyName": "Trend Following", "strategyVersion": "v2.1",
+    "marketRegime": "TRENDING",
+    "indicatorSnapshot": { "ema12": 67100, "ema26": 66500, "atr14": 1200, "adx": 35 },
+    "riskSettings": { "riskPercent": 1.5, "stopLossDistance": 1800 },
+    "entryReason": "EMA12 crossed above EMA26 with ADX > 25 confirming trend"
+  }
+}
+```
+
+### Trade Closed (`/user/topic/trades`)
+```json
+{
+  "type": "TRADE_CLOSED",
+  "trade": { "...same as above with exitPrice, pnl, closedAt..." },
+  "explanation": { "...includes exitReason..." }
+}
+```
+
+### Stop Loss / Take Profit Triggered (`/user/topic/trades`)
+```json
+{
+  "type": "STOP_LOSS_TRIGGERED",
+  "tradeId": "uuid",
+  "symbol": "BTC/USDT",
+  "triggerPrice": 65200,
+  "pnl": -270.00
+}
+```
+
+### Position Update (`/user/topic/positions`)
+```json
+{
+  "type": "POSITION_UPDATE",
+  "position": {
+    "symbol": "BTC/USDT", "side": "LONG", "size": 0.15,
+    "entryPrice": 67000, "currentPrice": 67432.50,
+    "pnl": 64.88, "pnlPercent": 0.65
+  }
+}
+```
+
+### Order Update (`/user/topic/orders`)
+```json
+{
+  "type": "ORDER_UPDATE",
+  "order": {
+    "id": "uuid", "status": "FILLED", "filledQuantity": 0.15,
+    "avgFillPrice": 67005, "slippage": 0.0075
+  }
+}
+```
+
+### Notification (`/topic/notifications`)
+```json
+{
+  "type": "NOTIFICATION",
+  "level": "WARNING",
+  "title": "Daily Loss Limit Approaching",
+  "message": "Current daily loss is 82% of configured limit",
+  "timestamp": "2025-03-01T14:30:00Z"
+}
+```
+
+---
+
+## 10. Exchange Integration <a name="exchange-integration"></a>
+
+### ExchangeClient Interface
+
+```java
+public interface ExchangeClient {
+    OrderResult placeOrder(OrderRequest request);
+    void cancelOrder(String symbol, String orderId);
+    List<ExchangeOrder> getOpenOrders(String symbol);
+    Map<String, Balance> getBalances();
+    List<ExchangePosition> getPositions();
+    double getMarketPrice(String symbol);
+    List<Candle> getCandles(String symbol, String timeframe, int limit);
+}
+```
+
+### Binance Implementation
+
+```java
+@Service
+public class BinanceExchangeClient implements ExchangeClient {
+
+    // HMAC SHA256 signature for authenticated endpoints
+    private String sign(String queryString, String secret) {
+        Mac hmac = Mac.getInstance("HmacSHA256");
+        hmac.init(new SecretKeySpec(secret.getBytes(), "HmacSHA256"));
+        return Hex.encodeHexString(hmac.doFinal(queryString.getBytes()));
+    }
+
+    // All requests include timestamp + recvWindow (5000ms default)
+    // Rate limiting: Track X-MBX-USED-WEIGHT header, back off at 80% capacity
+    // Retry: 3 attempts with exponential backoff for network errors
+    // Error handling: Map Binance error codes to domain exceptions
+}
+```
+
+### API Key Encryption
+
+```java
+@Service
+public class ApiKeyEncryptionService {
+    // AES-256-GCM encryption for storing API keys
+    // Keys derived from AES_ENCRYPTION_KEY env var via PBKDF2
+    // Each key gets unique IV stored alongside ciphertext
+    // Withdrawal permissions MUST be verified as disabled on key addition
+}
+```
+
+---
+
+## 11. Order Reconciliation <a name="reconciliation"></a>
+
+```java
+@Scheduled(fixedRate = 30000) // Every 30 seconds
+public void reconcileOrders() {
+    // 1. Get all orders with status PENDING or PARTIALLY_FILLED from DB
+    List<Order> pendingOrders = orderRepository.findByStatusIn(
+        List.of(OrderStatus.PENDING, OrderStatus.PARTIALLY_FILLED)
+    );
+
+    for (Order order : pendingOrders) {
+        // 2. Query exchange for current status
+        ExchangeOrder exchangeOrder = exchangeClient.getOrder(
+            order.getSymbol(), order.getExchangeOrderId()
+        );
+
+        // 3. If status differs, update local state
+        if (!order.getStatus().equals(mapStatus(exchangeOrder.getStatus()))) {
+            order.setStatus(mapStatus(exchangeOrder.getStatus()));
+            order.setFilledQuantity(exchangeOrder.getExecutedQty());
+            order.setAvgFillPrice(exchangeOrder.getAvgPrice());
+            orderRepository.save(order);
+
+            // 4. If filled, update trade and position
+            if (order.getStatus() == OrderStatus.FILLED) {
+                tradeService.handleOrderFill(order);
+                wsPublisher.publishOrderUpdate(order.getUserId(), order);
+            }
+        }
+    }
+
+    // 5. Check for orphaned exchange orders not in our DB
+    List<ExchangeOrder> exchangeOrders = exchangeClient.getOpenOrders(null);
+    for (ExchangeOrder eo : exchangeOrders) {
+        if (!orderRepository.existsByExchangeOrderId(eo.getOrderId())) {
+            auditService.log(AuditAction.ORPHAN_ORDER_DETECTED, eo);
+        }
+    }
+}
+```
+
+---
+
+## 12. Security & Auth <a name="security"></a>
+
+### Role-Based Access
+
+```java
+public enum AppRole {
+    ADMIN,   // Full system access, user management, kill switch
+    USER,    // Own bots, trades, positions, API keys
+    VIEWER   // Read-only access to own data, no trading
+}
+```
+
+### JWT Configuration
+
+- Access token: 15 minutes expiry
+- Refresh token: 7 days expiry, stored in httpOnly cookie
+- Refresh endpoint: `POST /api/auth/refresh` with refresh token in body
+- Token contains: userId, email, roles[], issuedAt, expiresAt
+
+### Rate Limiting
+
+```java
+@Configuration
+public class RateLimitConfig {
+    // Per-user rate limits:
+    // - General API: 60 requests/minute
+    // - Order placement: 10 requests/second
+    // - Market data: 30 requests/minute
+    // - Auth endpoints: 5 requests/minute (brute force protection)
+    // Implemented via Spring bucket4j or Resilience4j
+}
+```
+
+### Audit Logging
+
+All sensitive actions are logged to `audit_logs` table:
+- LOGIN, LOGOUT, REGISTER
+- ORDER_PLACED, ORDER_CANCELLED
+- BOT_STARTED, BOT_STOPPED
+- KILL_SWITCH_ACTIVATED, KILL_SWITCH_DEACTIVATED
+- API_KEY_ADDED, API_KEY_DELETED
+- RISK_CONFIG_CHANGED
+- USER_DISABLED, USER_ENABLED
+
+---
+
+## 13. Execution Engine — Advanced Features <a name="execution-advanced"></a>
+
+### Trailing Stop
+
+```java
+public class TrailingStopManager {
+    // Activated when trade reaches a configurable profit threshold
+    // Trail distance = ATR × multiplier (from strategy params)
+    // Updated on each price tick via WebSocket
+    // If price reverses beyond trail distance, triggers market close
+    // Thread-safe via ConcurrentHashMap of active trailing stops
+}
+```
+
+### Partial Close
+
+```java
+public class PartialCloseManager {
+    // Configurable take-profit levels:
+    // Level 1: Close 50% at 1:1 R:R → move SL to breakeven
+    // Level 2: Close 30% at 2:1 R:R → trail remaining
+    // Level 3: Close remaining at trailing stop
+    // Each level creates a separate exit order
+}
+```
+
+---
+
+## 14. Docker Production Configuration <a name="docker"></a>
 
 ### Dockerfile
 
@@ -658,7 +919,7 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
 
-### docker-compose.yml
+### docker-compose.yml (Production)
 
 ```yaml
 version: '3.8'
@@ -668,15 +929,24 @@ services:
     ports:
       - "8080:8080"
     environment:
+      SPRING_PROFILES_ACTIVE: production
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/tradeengine
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
       SPRING_REDIS_HOST: redis
       JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       AES_ENCRYPTION_KEY: ${AES_KEY}
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
   db:
     image: postgres:16-alpine
@@ -687,23 +957,42 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redisdata:/data
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  redisdata:
 ```
 
-### application.yml
+### application-production.yml
 
 ```yaml
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/tradeengine
-    driver-class-name: org.postgresql.Driver
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
   jpa:
     hibernate:
       ddl-auto: validate
@@ -713,12 +1002,14 @@ spring:
   flyway:
     enabled: true
   redis:
-    host: localhost
+    host: ${SPRING_REDIS_HOST:localhost}
     port: 6379
 
 jwt:
   secret: ${JWT_SECRET}
-  expiration: 86400000  # 24 hours
+  refresh-secret: ${JWT_REFRESH_SECRET}
+  access-expiration: 900000       # 15 minutes
+  refresh-expiration: 604800000   # 7 days
 
 encryption:
   aes-key: ${AES_ENCRYPTION_KEY}
@@ -727,6 +1018,9 @@ exchange:
   binance:
     base-url: https://api.binance.com
     ws-url: wss://stream.binance.com:9443/ws
+    recv-window: 5000
+    rate-limit-weight: 1200
+    rate-limit-orders: 10
 
 risk:
   defaults:
@@ -735,6 +1029,16 @@ risk:
     max-total-exposure: 60.0
     max-symbol-exposure: 25.0
     min-risk-reward: 1.5
+    drawdown-reduction-threshold: 10.0
+
+reconciliation:
+  interval: 30000  # 30 seconds
+  enabled: true
+
+logging:
+  level:
+    com.tradeengine: INFO
+    org.springframework.security: WARN
 ```
 
 ---
@@ -742,18 +1046,19 @@ risk:
 ## Frontend Connection Points
 
 The React frontend connects to this backend via:
-1. **REST API**: All CRUD operations through Axios/fetch with JWT bearer token
-2. **WebSocket**: STOMP over SockJS for live market data, position updates, order status
-3. **Authentication**: JWT stored in httpOnly cookie or memory (not localStorage)
+1. **REST API**: All CRUD operations through Axios with JWT bearer token and automatic refresh
+2. **WebSocket**: STOMP over SockJS for live market data, position updates, order status, trade events
+3. **Authentication**: JWT stored in memory (not localStorage), refresh token in httpOnly cookie
 
-### Example API Client Setup
+### Frontend Architecture
 
-```typescript
-// src/lib/api.ts
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
-
-const api = {
-  get: (path: string) => fetch(`${API_BASE}${path}`, { headers: authHeaders() }),
-  post: (path: string, body: any) => fetch(`${API_BASE}${path}`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }),
-};
+```
+src/
+├── lib/api.ts              ← Axios client with JWT interceptors, auto-refresh on 401
+├── lib/ws.ts               ← STOMP/SockJS client with auto-reconnect, exponential backoff
+├── types/index.ts           ← TypeScript DTOs matching all backend schemas
+├── contexts/AuthContext.tsx ← JWT lifecycle, login/register/logout, user state
+├── hooks/api/               ← React Query hooks per domain (useBots, useTrades, etc.)
+├── components/ProtectedRoute.tsx ← Auth guard redirecting to /login
+└── pages/Login.tsx, Register.tsx ← Auth forms with zod validation
 ```
