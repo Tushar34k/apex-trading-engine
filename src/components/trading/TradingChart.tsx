@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { createChart, ColorType, IChartApi } from "lightweight-charts";
+import { createChart, ColorType, IChartApi, CandlestickSeries, LineSeries, createSeriesMarkers } from "lightweight-charts";
 
 const generateCandleData = () => {
   const data = [];
@@ -62,17 +62,16 @@ export function TradingChart() {
     chartRef.current = chart;
 
     const candleData = generateCandleData();
-    const candleSeries = chart.addSeries({
-      type: 'Candlestick',
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
       downColor: "#ef4444",
       borderUpColor: "#22c55e",
       borderDownColor: "#ef4444",
       wickUpColor: "#22c55e80",
       wickDownColor: "#ef444480",
-    } as any);
+    });
     candleSeries.setData(candleData);
-    (candleSeries as any).setMarkers(generateMarkers(candleData));
+    createSeriesMarkers(candleSeries, generateMarkers(candleData));
 
     // EMA line
     const emaData = candleData.map((d, i) => {
@@ -81,7 +80,7 @@ export function TradingChart() {
       const avg = slice.reduce((s, c) => s + c.close, 0) / 20;
       return { time: d.time, value: avg };
     });
-    const emaSeries = chart.addSeries({ type: 'Line', color: "hsl(199 89% 48%)", lineWidth: 1 } as any);
+    const emaSeries = chart.addSeries(LineSeries, { color: "hsl(199 89% 48%)", lineWidth: 1 });
     emaSeries.setData(emaData);
 
     chart.timeScale().fitContent();
