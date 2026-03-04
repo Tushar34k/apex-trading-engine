@@ -1,10 +1,12 @@
 import { Key, Shield, Eye, EyeOff, Plus, Trash2, CheckCircle, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useApiKeys, useDeleteApiKey, useTestApiKey } from "@/hooks/api/useApiKeys";
+import { AddApiKeyDialog } from "@/components/trading/AddApiKeyDialog";
 import type { ApiKey } from "@/types";
 
 export default function ApiKeys() {
   const [showKeys, setShowKeys] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const { data: keysList, isLoading } = useApiKeys();
   const deleteKey = useDeleteApiKey();
   const testKey = useTestApiKey();
@@ -18,7 +20,7 @@ export default function ApiKeys() {
           <h1 className="text-xl font-bold text-foreground">API Key Management</h1>
           <p className="text-sm text-muted-foreground">Securely manage exchange connections</p>
         </div>
-        <button className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+        <button onClick={() => setDialogOpen(true)} className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" /> Add API Key
         </button>
       </div>
@@ -100,6 +102,8 @@ export default function ApiKeys() {
           ))}
         </div>
       )}
+
+      <AddApiKeyDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>
   );
 }
