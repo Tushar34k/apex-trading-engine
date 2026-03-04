@@ -1,22 +1,33 @@
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-
-const generateEquityData = () => {
-  const data = [];
-  let equity = 10000;
-  for (let i = 0; i < 90; i++) {
-    equity += (Math.random() - 0.42) * 200;
-    const date = new Date(2024, 0, i + 1);
-    data.push({
-      date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      equity: Math.round(equity * 100) / 100,
-    });
-  }
-  return data;
-};
-
-const data = generateEquityData();
+import { useEquityCurve } from "@/hooks/api/useAnalytics";
+import type { EquityCurvePoint } from "@/types";
 
 export function EquityCurve() {
+  const { data: curveData, isLoading } = useEquityCurve();
+
+  const data = (curveData ?? []).map((p: EquityCurvePoint) => ({
+    date: new Date(p.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    equity: p.equity,
+  }));
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold text-foreground mb-4">Equity Curve</h3>
+        <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (data.length === 0) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold text-foreground mb-4">Equity Curve</h3>
+        <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">No equity data yet. Complete trades to see your equity curve.</div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <h3 className="text-sm font-semibold text-foreground mb-4">Equity Curve</h3>
@@ -33,7 +44,7 @@ export function EquityCurve() {
             tick={{ fill: "hsl(215 15% 55%)", fontSize: 10 }}
             axisLine={{ stroke: "hsl(220 14% 18%)" }}
             tickLine={false}
-            interval={14}
+            interval="preserveStartEnd"
           />
           <YAxis
             tick={{ fill: "hsl(215 15% 55%)", fontSize: 10 }}

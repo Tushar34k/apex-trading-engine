@@ -2,6 +2,8 @@ package com.tradeengine.controller;
 
 import com.tradeengine.model.TradingBot;
 import com.tradeengine.repository.BotRepository;
+import com.tradeengine.repository.OrderRepository;
+import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.repository.StrategyRepository;
 import com.tradeengine.service.BotService;
 import jakarta.validation.Valid;
@@ -12,9 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 import static com.tradeengine.controller.UserController.getUserId;
 
@@ -26,6 +26,8 @@ public class BotController {
     private final BotService botService;
     private final BotRepository botRepo;
     private final StrategyRepository strategyRepo;
+    private final OrderRepository orderRepo;
+    private final PositionRepository positionRepo;
 
     @Data
     public static class CreateBotRequest {
@@ -41,22 +43,36 @@ public class BotController {
         var bots = botRepo.findByUserId(getUserId());
         var result = bots.stream().map(b -> {
             var strategy = strategyRepo.findById(b.getStrategyId()).orElse(null);
-            return Map.<String, Object>of(
-                "id", b.getId(),
-                "userId", b.getUserId(),
-                "strategyId", b.getStrategyId(),
-                "strategyName", strategy != null ? strategy.getName() : "Unknown",
-                "strategyVersion", strategy != null ? strategy.getVersion() : "",
-                "apiKeyId", b.getApiKeyId(),
-                "symbol", b.getSymbol(),
-                "timeframe", b.getTimeframe(),
-                "mode", b.getMode(),
-                "status", b.getStatus(),
-                "createdAt", b.getCreatedAt().toString(),
-                "pnl", 0,
-                "totalTrades", 0,
-                "winRate", 0
-            );
+            // Count trades and calculate PnL
+            var orders = orderRepo.findByBotId(b.getId());
+            var closedPositions = positionRepo.findByBotIdAndStatus(b.getId(), "CLOSED");
+            int totalTrades = closedPositions.size();
+            BigDecimal totalPnl = closedPositions.stream()
+                .map(p -> p.getRealizedPnl() != null ? p.getRealizedPnl() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+            long wins = closedPositions.stream()
+                .filter(p -> p.getRealizedPnl() != null && p.getRealizedPnl().compareTo(BigDecimal.ZERO) > 0)
+                .count();
+            double winRate = totalTrades > 0 ? (double) wins / totalTrades : 0;
+
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", b.getId());
+            map.put("userId", b.getUserId());
+            map.put("strategyId", b.getStrategyId());
+            map.put("strategyName", strategy != null ? strategy.getName() : "Unknown");
+            map.put("strategyVersion", strategy != null ? strategy.getVersion() : "");
+            map.put("apiKeyId", b.getApiKeyId());
+            map.put("symbol", b.getSymbol());
+            map.put("timeframe", b.getTimeframe());
+            map.put("mode", b.getMode());
+            map.put("status", b.getStatus());
+            map.put("createdAt", b.getCreatedAt().toString());
+            map.put("startedAt", b.getStartedAt() != null ? b.getStartedAt().toString() : null);
+            map.put("stoppedAt", b.getStoppedAt() != null ? b.getStoppedAt().toString() : null);
+            map.put("pnl", totalPnl);
+            map.put("totalTrades", totalTrades);
+            map.put("winRate", winRate);
+            return map;
         }).toList();
         return ResponseEntity.ok(result);
     }
