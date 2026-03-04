@@ -21,7 +21,7 @@ encryption:
 
 exchange:
   binance:
-    base-url: https://api.binance.com
+    base-url: ${BINANCE_BASE_URL:https://api.binance.com}
     recv-window: 5000
 
 server:

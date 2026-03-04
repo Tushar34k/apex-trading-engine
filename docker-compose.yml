@@ -10,9 +10,29 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-min-256-bits-long-secret-key}
       AES_KEY: ${AES_KEY:-change-me-32-char-aes-key-here!}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      BINANCE_BASE_URL: ${BINANCE_BASE_URL:-https://api.binance.com}
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/auth/login || true"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      VITE_API_URL: http://localhost:8080/api
+      VITE_WS_URL: http://localhost:8080/ws
+    depends_on:
+      - app
     restart: unless-stopped
 
   db:
