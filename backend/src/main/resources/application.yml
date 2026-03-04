@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://db:5432/tradeengine}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+
+jwt:
+  secret: ${JWT_SECRET:change-me-in-production-min-256-bits-long-secret-key}
+  expiration: 86400000
+
+encryption:
+  aes-key: ${AES_KEY:change-me-32-char-aes-key-here!}
+
+exchange:
+  binance:
+    base-url: https://api.binance.com
+    recv-window: 5000
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.tradeengine: INFO
