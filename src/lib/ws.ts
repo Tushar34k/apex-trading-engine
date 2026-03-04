@@ -1,5 +1,4 @@
 import { Client, IMessage } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
 import type { WebSocketEvent } from '@/types';
 import { getAccessToken } from './api';
 
@@ -23,7 +22,7 @@ class WebSocketClient {
     const token = getAccessToken();
 
     this.client = new Client({
-      webSocketFactory: () => new SockJS(WS_URL),
+      brokerURL: WS_URL.replace(/^http/, 'ws'),
       connectHeaders: token ? { Authorization: `Bearer ${token}` } : {},
       reconnectDelay: this.reconnectDelay,
       heartbeatIncoming: 10000,
