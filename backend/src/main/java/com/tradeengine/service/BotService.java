@@ -23,8 +23,11 @@ public class BotService {
 
         bot.setStatus("RUNNING");
         bot.setStartedAt(Instant.now());
+        bot.setStoppedAt(null);
+        bot.setProcessing(false);
         botRepo.save(bot);
-        log.info("Bot {} started for symbol {}", botId, bot.getSymbol());
+        log.info("Bot {} started: {} {} EMA({}/{}) {}%",
+            botId, bot.getName(), bot.getSymbol(), bot.getFastEma(), bot.getSlowEma(), bot.getTradeSizePercent());
     }
 
     public void stopBot(UUID botId, UUID userId) {
@@ -34,6 +37,7 @@ public class BotService {
 
         bot.setStatus("STOPPED");
         bot.setStoppedAt(Instant.now());
+        bot.setProcessing(false);
         botRepo.save(bot);
         log.info("Bot {} stopped", botId);
     }

@@ -1,4 +1,4 @@
-import { Bell, Circle, Wifi, WifiOff, LogOut, FlaskConical } from "lucide-react";
+import { Circle, Wifi, WifiOff, LogOut, FlaskConical } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWebSocket, useMarketPrice } from "@/hooks/useWebSocket";
 import { useBots } from "@/hooks/api/useBots";
@@ -7,11 +7,9 @@ export function TopBar() {
   const { user, logout } = useAuth();
   const { connected } = useWebSocket();
   const btcPrice = useMarketPrice('BTCUSDT');
-  const ethPrice = useMarketPrice('ETHUSDT');
   const { data: botsList } = useBots();
 
   const activeBotCount = botsList?.filter((b) => b.status === 'RUNNING').length ?? 0;
-  const hasPaperBot = botsList?.some((b) => b.status === 'RUNNING' && b.mode === 'PAPER') ?? false;
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? '??';
 
   return (
@@ -24,7 +22,7 @@ export function TopBar() {
             <WifiOff className="h-3.5 w-3.5 text-loss" />
           )}
           <span className="text-xs text-muted-foreground">
-            {connected ? 'Exchange Connected' : 'Disconnected'}
+            {connected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
         <div className="h-4 w-px bg-border" />
@@ -34,27 +32,16 @@ export function TopBar() {
             {btcPrice.price ? `$${btcPrice.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
           </span>
         </span>
-        <span className="font-mono text-xs text-muted-foreground">
-          ETH{' '}
-          <span className={ethPrice.change24h >= 0 ? 'text-profit' : 'text-loss'}>
-            {ethPrice.price ? `$${ethPrice.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
-          </span>
-        </span>
+        <div className="flex items-center gap-1.5 rounded-md bg-warning/10 border border-warning/20 px-2.5 py-1">
+          <FlaskConical className="h-3.5 w-3.5 text-warning" />
+          <span className="text-[10px] font-bold text-warning uppercase tracking-wider">Testnet</span>
+        </div>
       </div>
       <div className="flex items-center gap-4">
-        {hasPaperBot && (
-          <div className="flex items-center gap-1.5 rounded-md bg-warning/10 border border-warning/20 px-2.5 py-1">
-            <FlaskConical className="h-3.5 w-3.5 text-warning" />
-            <span className="text-[10px] font-bold text-warning uppercase tracking-wider">Testnet Mode</span>
-          </div>
-        )}
         <div className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5">
           <Circle className={`h-2 w-2 fill-current ${activeBotCount > 0 ? 'text-profit animate-pulse' : 'text-muted-foreground'}`} />
           <span className="text-xs font-medium text-foreground">{activeBotCount} Bot{activeBotCount !== 1 ? 's' : ''} Active</span>
         </div>
-        <button className="relative text-muted-foreground hover:text-foreground transition-colors">
-          <Bell className="h-4 w-4" />
-        </button>
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">
             {initials}

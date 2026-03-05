@@ -7,14 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
-import Strategies from "./pages/Strategies";
-import RiskControl from "./pages/RiskControl";
-import Portfolio from "./pages/Portfolio";
-import Backtesting from "./pages/Backtesting";
-import PaperTrading from "./pages/PaperTrading";
-import Analytics from "./pages/Analytics";
 import ApiKeys from "./pages/ApiKeys";
-import Admin from "./pages/Admin";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
@@ -42,14 +35,7 @@ const App = () => (
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Index />} />
-                <Route path="/strategies" element={<Strategies />} />
-                <Route path="/risk" element={<RiskControl />} />
-                <Route path="/portfolio" element={<Portfolio />} />
-                <Route path="/backtesting" element={<Backtesting />} />
-                <Route path="/paper-trading" element={<PaperTrading />} />
-                <Route path="/analytics" element={<Analytics />} />
                 <Route path="/api-keys" element={<ApiKeys />} />
-                <Route path="/admin" element={<Admin />} />
               </Route>
             </Route>
             <Route path="*" element={<NotFound />} />

@@ -2,9 +2,6 @@ package com.tradeengine.controller;
 
 import com.tradeengine.model.TradingBot;
 import com.tradeengine.repository.BotRepository;
-import com.tradeengine.repository.OrderRepository;
-import com.tradeengine.repository.PositionRepository;
-import com.tradeengine.repository.StrategyRepository;
 import com.tradeengine.service.BotService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -25,55 +22,23 @@ public class BotController {
 
     private final BotService botService;
     private final BotRepository botRepo;
-    private final StrategyRepository strategyRepo;
-    private final OrderRepository orderRepo;
-    private final PositionRepository positionRepo;
 
     @Data
     public static class CreateBotRequest {
-        @NotBlank private String strategyId;
-        @NotBlank private String apiKeyId;
+        @NotBlank private String name;
         @NotBlank private String symbol;
-        private String timeframe = "1h";
-        private String mode = "LIVE";
+        private String timeframe = "1m";
+        private String strategyType = "EMA_CROSS";
+        private int fastEma = 9;
+        private int slowEma = 21;
+        private BigDecimal tradeSizePercent = new BigDecimal("10");
+        @NotBlank private String apiKeyId;
     }
 
     @GetMapping
     public ResponseEntity<?> list() {
         var bots = botRepo.findByUserId(getUserId());
-        var result = bots.stream().map(b -> {
-            var strategy = strategyRepo.findById(b.getStrategyId()).orElse(null);
-            // Count trades and calculate PnL
-            var orders = orderRepo.findByBotId(b.getId());
-            var closedPositions = positionRepo.findByBotIdAndStatus(b.getId(), "CLOSED");
-            int totalTrades = closedPositions.size();
-            BigDecimal totalPnl = closedPositions.stream()
-                .map(p -> p.getRealizedPnl() != null ? p.getRealizedPnl() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-            long wins = closedPositions.stream()
-                .filter(p -> p.getRealizedPnl() != null && p.getRealizedPnl().compareTo(BigDecimal.ZERO) > 0)
-                .count();
-            double winRate = totalTrades > 0 ? (double) wins / totalTrades : 0;
-
-            Map<String, Object> map = new HashMap<>();
-            map.put("id", b.getId());
-            map.put("userId", b.getUserId());
-            map.put("strategyId", b.getStrategyId());
-            map.put("strategyName", strategy != null ? strategy.getName() : "Unknown");
-            map.put("strategyVersion", strategy != null ? strategy.getVersion() : "");
-            map.put("apiKeyId", b.getApiKeyId());
-            map.put("symbol", b.getSymbol());
-            map.put("timeframe", b.getTimeframe());
-            map.put("mode", b.getMode());
-            map.put("status", b.getStatus());
-            map.put("createdAt", b.getCreatedAt().toString());
-            map.put("startedAt", b.getStartedAt() != null ? b.getStartedAt().toString() : null);
-            map.put("stoppedAt", b.getStoppedAt() != null ? b.getStoppedAt().toString() : null);
-            map.put("pnl", totalPnl);
-            map.put("totalTrades", totalTrades);
-            map.put("winRate", winRate);
-            return map;
-        }).toList();
+        var result = bots.stream().map(this::toMap).toList();
         return ResponseEntity.ok(result);
     }
 
@@ -81,13 +46,16 @@ public class BotController {
     public ResponseEntity<?> create(@Valid @RequestBody CreateBotRequest req) {
         TradingBot bot = new TradingBot();
         bot.setUserId(getUserId());
-        bot.setStrategyId(UUID.fromString(req.getStrategyId()));
-        bot.setApiKeyId(UUID.fromString(req.getApiKeyId()));
-        bot.setSymbol(req.getSymbol());
+        bot.setName(req.getName());
+        bot.setSymbol(req.getSymbol().toUpperCase());
         bot.setTimeframe(req.getTimeframe());
-        bot.setMode(req.getMode());
+        bot.setStrategyType(req.getStrategyType());
+        bot.setFastEma(req.getFastEma());
+        bot.setSlowEma(req.getSlowEma());
+        bot.setTradeSizePercent(req.getTradeSizePercent());
+        bot.setApiKeyId(UUID.fromString(req.getApiKeyId()));
         bot = botRepo.save(bot);
-        return ResponseEntity.ok(Map.of("id", bot.getId()));
+        return ResponseEntity.ok(toMap(bot));
     }
 
     @PostMapping("/{id}/start")
@@ -107,12 +75,33 @@ public class BotController {
         var bot = botRepo.findById(UUID.fromString(id)).orElse(null);
         if (bot == null) return ResponseEntity.notFound().build();
         if (!bot.getUserId().equals(getUserId())) return ResponseEntity.status(403).build();
+        return ResponseEntity.ok(toMap(bot));
+    }
+
+    private Map<String, Object> toMap(TradingBot b) {
         Map<String, Object> map = new HashMap<>();
-        map.put("id", bot.getId());
-        map.put("status", bot.getStatus());
-        map.put("symbol", bot.getSymbol());
-        map.put("startedAt", bot.getStartedAt() != null ? bot.getStartedAt().toString() : null);
-        map.put("stoppedAt", bot.getStoppedAt() != null ? bot.getStoppedAt().toString() : null);
-        return ResponseEntity.ok(map);
+        map.put("id", b.getId());
+        map.put("userId", b.getUserId());
+        map.put("name", b.getName());
+        map.put("symbol", b.getSymbol());
+        map.put("timeframe", b.getTimeframe());
+        map.put("strategyType", b.getStrategyType());
+        map.put("fastEma", b.getFastEma());
+        map.put("slowEma", b.getSlowEma());
+        map.put("tradeSizePercent", b.getTradeSizePercent());
+        map.put("status", b.getStatus());
+        map.put("hasOpenPosition", b.isHasOpenPosition());
+        map.put("entryPrice", b.getEntryPrice());
+        map.put("quantity", b.getQuantity());
+        map.put("createdAt", b.getCreatedAt() != null ? b.getCreatedAt().toString() : null);
+        map.put("startedAt", b.getStartedAt() != null ? b.getStartedAt().toString() : null);
+        map.put("stoppedAt", b.getStoppedAt() != null ? b.getStoppedAt().toString() : null);
+        map.put("lastTradeTime", b.getLastTradeTime() != null ? b.getLastTradeTime().toString() : null);
+        map.put("isProcessing", b.isProcessing());
+        // Computed — will be 0 for now, real values come from trades table
+        map.put("pnl", 0);
+        map.put("totalTrades", 0);
+        map.put("winRate", 0);
+        return map;
     }
 }

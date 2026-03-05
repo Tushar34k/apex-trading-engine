@@ -21,11 +21,14 @@ encryption:
 
 exchange:
   binance:
-    base-url: ${BINANCE_BASE_URL:https://api.binance.com}
+    base-url: ${BINANCE_BASE_URL:https://testnet.binance.vision}
     recv-window: 5000
 
 server:
   port: 8080
+
+live-trading:
+  enabled: ${LIVE_TRADING_ENABLED:false}
 
 logging:
   level:

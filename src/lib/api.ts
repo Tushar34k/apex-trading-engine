@@ -2,14 +2,8 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'ax
 import type {
   AuthTokens, LoginRequest, RegisterRequest, User,
   ApiKey, AddApiKeyRequest, ApiKeyTestResult,
-  Strategy, StrategyParameter, StrategyPerformance,
   TradingBot, CreateBotRequest,
-  Order, Trade, TradeDetail, Position,
-  RiskConfigItem, RiskStatus, ExposureBreakdown,
-  BacktestRun, RunBacktestRequest, BacktestTrade,
-  CandleData,
-  PerformanceMetrics, EquityCurvePoint, MonthlyReturn, StrategyComparisonItem,
-  AdminUser, SystemHealth, Balance,
+  Order, Trade, Position, Balance, CandleData,
 } from '@/types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
@@ -106,7 +100,7 @@ client.interceptors.response.use(
 );
 
 // ============================================
-// API Methods
+// API Methods — V1
 // ============================================
 
 // --- Auth ---
@@ -122,110 +116,48 @@ export const auth = {
 // --- Users ---
 export const users = {
   me: () => client.get<User>('/users/me').then((r) => r.data),
-  update: (data: Partial<User>) => client.put<User>('/users/me', data).then((r) => r.data),
 };
 
 // --- API Keys ---
 export const apiKeys = {
-  list: () => client.get<ApiKey[]>('/api-keys').then((r) => r.data),
-  add: (data: AddApiKeyRequest) => client.post<ApiKey>('/api-keys', data).then((r) => r.data),
-  delete: (id: string) => client.delete(`/api-keys/${id}`),
-  test: (id: string) => client.post<ApiKeyTestResult>(`/api-keys/${id}/test`).then((r) => r.data),
-};
-
-// --- Strategies ---
-export const strategies = {
-  list: () => client.get<Strategy[]>('/strategies').then((r) => r.data),
-  get: (id: string) => client.get<Strategy>(`/strategies/${id}`).then((r) => r.data),
-  create: (data: Partial<Strategy>) => client.post<Strategy>('/strategies', data).then((r) => r.data),
-  update: (id: string, data: Partial<Strategy>) => client.put<Strategy>(`/strategies/${id}`, data).then((r) => r.data),
-  getParams: (id: string) => client.get<StrategyParameter[]>(`/strategies/${id}/parameters`).then((r) => r.data),
-  updateParams: (id: string, params: Partial<StrategyParameter>[]) =>
-    client.put<StrategyParameter[]>(`/strategies/${id}/parameters`, params).then((r) => r.data),
-  getPerformance: (id: string) =>
-    client.get<StrategyPerformance>(`/strategies/${id}/performance`).then((r) => r.data),
+  list: () => client.get<ApiKey[]>('/keys').then((r) => r.data),
+  add: (data: AddApiKeyRequest) => client.post<ApiKey>('/keys', data).then((r) => r.data),
+  delete: (id: string) => client.delete(`/keys/${id}`),
+  test: (id: string) => client.post<ApiKeyTestResult>(`/keys/${id}/test`).then((r) => r.data),
 };
 
 // --- Bots ---
 export const bots = {
   list: () => client.get<TradingBot[]>('/bots').then((r) => r.data),
   create: (data: CreateBotRequest) => client.post<TradingBot>('/bots', data).then((r) => r.data),
-  start: (id: string) => client.post<TradingBot>(`/bots/${id}/start`).then((r) => r.data),
-  stop: (id: string) => client.post<TradingBot>(`/bots/${id}/stop`).then((r) => r.data),
-  pause: (id: string) => client.post<TradingBot>(`/bots/${id}/pause`).then((r) => r.data),
-  delete: (id: string) => client.delete(`/bots/${id}`),
+  start: (id: string) => client.post(`/bots/${id}/start`).then((r) => r.data),
+  stop: (id: string) => client.post(`/bots/${id}/stop`).then((r) => r.data),
+  status: (id: string) => client.get(`/bots/${id}/status`).then((r) => r.data),
 };
 
-// --- Orders & Trades ---
+// --- Trading Data ---
 export const orders = {
-  list: (params?: { botId?: string; status?: string; symbol?: string }) =>
+  list: (params?: { botId?: string }) =>
     client.get<Order[]>('/orders', { params }).then((r) => r.data),
 };
 
 export const trades = {
-  list: (params?: { botId?: string; status?: string; symbol?: string; mode?: string }) =>
+  list: (params?: { botId?: string }) =>
     client.get<Trade[]>('/trades', { params }).then((r) => r.data),
-  get: (id: string) => client.get<TradeDetail>(`/trades/${id}`).then((r) => r.data),
 };
 
 export const positions = {
   list: () => client.get<Position[]>('/positions').then((r) => r.data),
 };
 
-// --- Risk ---
-export const risk = {
-  getConfig: () => client.get<RiskConfigItem[]>('/risk/config').then((r) => r.data),
-  updateConfig: (items: Partial<RiskConfigItem>[]) =>
-    client.put<RiskConfigItem[]>('/risk/config', items).then((r) => r.data),
-  getStatus: () => client.get<RiskStatus>('/risk/status').then((r) => r.data),
-  getExposure: () => client.get<ExposureBreakdown[]>('/risk/exposure').then((r) => r.data),
-};
-
-// --- Backtesting ---
-export const backtest = {
-  run: (data: RunBacktestRequest) => client.post<BacktestRun>('/backtest/run', data).then((r) => r.data),
-  listResults: () => client.get<BacktestRun[]>('/backtest/results').then((r) => r.data),
-  get: (id: string) => client.get<BacktestRun>(`/backtest/${id}`).then((r) => r.data),
-  getTrades: (id: string) => client.get<BacktestTrade[]>(`/backtest/${id}/trades`).then((r) => r.data),
+export const balances = {
+  list: () => client.get<Balance[]>('/balances').then((r) => r.data),
 };
 
 // --- Market Data ---
-export interface SupportResistanceLevel {
-  price: number;
-  type: 'support' | 'resistance';
-  strength: number;
-}
-
 export const market = {
   getCandles: (symbol: string, timeframe: string, limit?: number) =>
     client.get<CandleData[]>('/market/candles', { params: { symbol, timeframe, limit } }).then((r) => r.data),
-  getSupportResistance: (symbol: string, timeframe?: string) =>
-    client.get<SupportResistanceLevel[]>('/market/support-resistance', { params: { symbol, timeframe } }).then((r) => r.data),
-};
-
-// --- Analytics ---
-export const analytics = {
-  getPerformance: () => client.get<PerformanceMetrics>('/analytics/performance').then((r) => r.data),
-  getEquityCurve: () => client.get<EquityCurvePoint[]>('/analytics/equity-curve').then((r) => r.data),
-  getMonthlyReturns: () => client.get<MonthlyReturn[]>('/analytics/monthly-returns').then((r) => r.data),
-  getStrategyComparison: () =>
-    client.get<StrategyComparisonItem[]>('/analytics/strategy-comparison').then((r) => r.data),
-};
-
-// --- Admin ---
-export const admin = {
-  listUsers: () => client.get<AdminUser[]>('/admin/users').then((r) => r.data),
-  disableUser: (id: string) => client.put(`/admin/users/${id}/disable`),
-  enableUser: (id: string) => client.put(`/admin/users/${id}/enable`),
-  killSwitch: () => client.post('/admin/kill-switch'),
-  resumeTrading: () => client.post('/admin/resume-trading'),
-  getSystemHealth: () => client.get<SystemHealth>('/admin/system-health').then((r) => r.data),
-  forceStopBot: (id: string) => client.post(`/admin/bots/${id}/force-stop`),
-};
-
-// --- Balances ---
-export const balances = {
-  list: () => client.get<Balance[]>('/balances').then((r) => r.data),
 };
 
 export default client;

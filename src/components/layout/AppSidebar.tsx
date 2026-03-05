@@ -2,31 +2,17 @@ import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
-  Bot,
-  Shield,
-  PieChart,
-  FlaskConical,
-  LineChart,
-  Settings,
+  Key,
   Activity,
   ChevronLeft,
   ChevronRight,
   Zap,
-  Key,
-  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/strategies", icon: Bot, label: "Strategies" },
-  { to: "/risk", icon: Shield, label: "Risk Control" },
-  { to: "/portfolio", icon: PieChart, label: "Portfolio" },
-  { to: "/backtesting", icon: FlaskConical, label: "Backtesting" },
-  { to: "/paper-trading", icon: BarChart3, label: "Paper Trading" },
-  { to: "/analytics", icon: LineChart, label: "Analytics" },
   { to: "/api-keys", icon: Key, label: "API Keys" },
-  { to: "/admin", icon: Settings, label: "Admin" },
 ];
 
 export function AppSidebar() {
@@ -40,7 +26,6 @@ export function AppSidebar() {
         collapsed ? "w-16" : "w-56"
       )}
     >
-      {/* Logo */}
       <div className="flex h-14 items-center border-b border-border px-4">
         <Zap className="h-6 w-6 text-primary shrink-0" />
         {!collapsed && (
@@ -50,7 +35,6 @@ export function AppSidebar() {
         )}
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 space-y-1 px-2 py-3 overflow-y-auto">
         {navItems.map((item) => {
           const isActive =
@@ -75,7 +59,6 @@ export function AppSidebar() {
         })}
       </nav>
 
-      {/* System Status */}
       {!collapsed && (
         <div className="border-t border-border p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -85,7 +68,6 @@ export function AppSidebar() {
         </div>
       )}
 
-      {/* Collapse toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="flex h-10 items-center justify-center border-t border-border text-muted-foreground hover:text-foreground transition-colors"

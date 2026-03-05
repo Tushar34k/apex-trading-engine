@@ -6,7 +6,7 @@ export function useBots() {
   return useQuery({
     queryKey: ['bots'],
     queryFn: botsApi.list,
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 }
 
