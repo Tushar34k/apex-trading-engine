@@ -190,9 +190,17 @@ export const backtest = {
 };
 
 // --- Market Data ---
+export interface SupportResistanceLevel {
+  price: number;
+  type: 'support' | 'resistance';
+  strength: number;
+}
+
 export const market = {
   getCandles: (symbol: string, timeframe: string, limit?: number) =>
     client.get<CandleData[]>('/market/candles', { params: { symbol, timeframe, limit } }).then((r) => r.data),
+  getSupportResistance: (symbol: string, timeframe?: string) =>
+    client.get<SupportResistanceLevel[]>('/market/support-resistance', { params: { symbol, timeframe } }).then((r) => r.data),
 };
 
 // --- Analytics ---
