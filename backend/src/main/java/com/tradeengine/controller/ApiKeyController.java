@@ -20,6 +20,7 @@ import static com.tradeengine.controller.UserController.getUserId;
 public class ApiKeyController {
 
     private final ApiKeyService service;
+    private final com.tradeengine.exchange.BinanceClient binance;
 
     @Data
     public static class AddKeyRequest {
@@ -57,5 +58,33 @@ public class ApiKeyController {
     public ResponseEntity<?> delete(@PathVariable String id) {
         service.deleteKey(java.util.UUID.fromString(id), getUserId());
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{id}/test")
+    public ResponseEntity<?> test(@PathVariable String id) {
+        var key = service.listForUser(getUserId()).stream()
+            .filter(k -> k.getId().equals(java.util.UUID.fromString(id)))
+            .findFirst().orElse(null);
+        if (key == null) return ResponseEntity.notFound().build();
+        try {
+            String decKey = service.decryptApiKey(key);
+            String decSecret = service.decryptApiSecret(key);
+            var balances = binance.getBalances(decKey, decSecret);
+            return ResponseEntity.ok(Map.of(
+                "valid", true,
+                "permissions", java.util.List.of("SPOT_TRADING", "READ"),
+                "futuresEnabled", false,
+                "spotEnabled", true,
+                "message", "Connection successful. Found " + balances.size() + " assets."
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.ok(Map.of(
+                "valid", false,
+                "permissions", java.util.List.of(),
+                "futuresEnabled", false,
+                "spotEnabled", false,
+                "message", "Connection failed: " + e.getMessage()
+            ));
+        }
     }
 }

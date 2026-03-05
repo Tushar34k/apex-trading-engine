@@ -8,3 +8,11 @@ export function useCandles(symbol: string, timeframe: string, limit?: number) {
     refetchInterval: 60000,
   });
 }
+
+export function useSupportResistance(symbol: string, timeframe?: string) {
+  return useQuery({
+    queryKey: ['support-resistance', symbol, timeframe],
+    queryFn: () => marketApi.getSupportResistance(symbol, timeframe),
+    refetchInterval: 300000, // 5 minutes
+  });
+}

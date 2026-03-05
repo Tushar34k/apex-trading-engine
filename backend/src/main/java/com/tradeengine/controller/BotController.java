@@ -101,4 +101,18 @@ public class BotController {
         botService.stopBot(UUID.fromString(id), getUserId());
         return ResponseEntity.ok(Map.of("status", "STOPPED"));
     }
+
+    @GetMapping("/{id}/status")
+    public ResponseEntity<?> status(@PathVariable String id) {
+        var bot = botRepo.findById(UUID.fromString(id)).orElse(null);
+        if (bot == null) return ResponseEntity.notFound().build();
+        if (!bot.getUserId().equals(getUserId())) return ResponseEntity.status(403).build();
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", bot.getId());
+        map.put("status", bot.getStatus());
+        map.put("symbol", bot.getSymbol());
+        map.put("startedAt", bot.getStartedAt() != null ? bot.getStartedAt().toString() : null);
+        map.put("stoppedAt", bot.getStoppedAt() != null ? bot.getStoppedAt().toString() : null);
+        return ResponseEntity.ok(map);
+    }
 }
