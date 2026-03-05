@@ -33,9 +33,6 @@ export function PositionsTable() {
                 <th className="px-4 py-2.5 text-right font-medium">Entry</th>
                 <th className="px-4 py-2.5 text-right font-medium">Current</th>
                 <th className="px-4 py-2.5 text-right font-medium">P&L</th>
-                <th className="px-4 py-2.5 text-left font-medium">Strategy</th>
-                <th className="px-4 py-2.5 text-right font-medium">SL</th>
-                <th className="px-4 py-2.5 text-right font-medium">TP</th>
               </tr>
             </thead>
             <tbody>
@@ -49,7 +46,7 @@ export function PositionsTable() {
                         {p.side}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-foreground">{p.size.toFixed(4)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-foreground">{p.size.toFixed(6)}</td>
                     <td className="px-4 py-3 text-right font-mono text-muted-foreground">${p.entryPrice.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right font-mono text-foreground">${p.currentPrice.toLocaleString()}</td>
                     <td className="px-4 py-3 text-right">
@@ -58,9 +55,6 @@ export function PositionsTable() {
                         <div className="text-[10px] opacity-70">{isProfitable ? '+' : ''}{p.pnlPercent.toFixed(2)}%</div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.strategyName}</td>
-                    <td className="px-4 py-3 text-right font-mono text-loss/70">${p.stopLoss.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-right font-mono text-profit/70">${p.takeProfit.toLocaleString()}</td>
                   </tr>
                 );
               })}

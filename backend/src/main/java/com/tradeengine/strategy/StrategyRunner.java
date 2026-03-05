@@ -12,16 +12,18 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
  * Runs every 60 seconds. For each RUNNING bot:
- * 1. Fetch candles from Binance
- * 2. Run EMA crossover strategy
- * 3. If BUY signal and no open position → place buy order
- * 4. If SELL signal and has open position → close position
+ * 1. Skip if isProcessing (prevent parallel execution)
+ * 2. Skip if trade cooldown not met (3 min)
+ * 3. Fetch candles from Binance
+ * 4. Run EMA crossover with bot's dynamic params
+ * 5. Execute BUY or SELL if signal
  */
 @Service
 @RequiredArgsConstructor
@@ -36,7 +38,9 @@ public class StrategyRunner {
     private final BinanceClient binance;
     private final TradeEventPublisher publisher;
 
-    @Scheduled(fixedDelay = 60000) // Every 60 seconds
+    private static final Duration TRADE_COOLDOWN = Duration.ofMinutes(3);
+
+    @Scheduled(fixedDelay = 60000)
     public void runStrategies() {
         List<TradingBot> runningBots = botRepo.findByStatus("RUNNING");
 
@@ -45,51 +49,94 @@ public class StrategyRunner {
                 processBot(bot);
             } catch (Exception e) {
                 log.error("Error processing bot {}: {}", bot.getId(), e.getMessage());
+                // Reset processing flag on error
+                bot.setProcessing(false);
+                botRepo.save(bot);
             }
         }
     }
 
     private void processBot(TradingBot bot) {
-        // 1. Get API keys
-        UserApiKey apiKey = apiKeyRepo.findById(bot.getApiKeyId())
-            .orElseThrow(() -> new RuntimeException("API key not found for bot " + bot.getId()));
+        // Guard: prevent parallel execution
+        if (bot.isProcessing()) {
+            log.debug("Bot {} is already processing, skipping", bot.getId());
+            return;
+        }
 
-        String decryptedKey = apiKeyService.decryptApiKey(apiKey);
-        String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
+        // Trade cooldown check
+        if (bot.getLastTradeTime() != null) {
+            Duration sinceLastTrade = Duration.between(bot.getLastTradeTime(), Instant.now());
+            if (sinceLastTrade.compareTo(TRADE_COOLDOWN) < 0) {
+                log.debug("Bot {} cooldown active ({} remaining)", bot.getId(),
+                    TRADE_COOLDOWN.minus(sinceLastTrade).toSeconds() + "s");
+                return;
+            }
+        }
 
-        // 2. Fetch candles (50 candles for EMA calculation)
-        List<double[]> candles = binance.getCandles(bot.getSymbol(), mapTimeframe(bot.getTimeframe()), 50);
-        List<Double> closingPrices = candles.stream()
-            .map(c -> c[4]) // close price
-            .collect(Collectors.toList());
+        // Set processing flag
+        bot.setProcessing(true);
+        botRepo.save(bot);
 
-        // 3. Evaluate strategy
-        EmaCrossover.SignalResult signal = EmaCrossover.evaluate(closingPrices);
-        log.debug("Bot {} signal: {} - {}", bot.getId(), signal.getSignal(), signal.getReason());
+        try {
+            // 1. Get API keys
+            UserApiKey apiKey = apiKeyRepo.findById(bot.getApiKeyId())
+                .orElseThrow(() -> new RuntimeException("API key not found for bot " + bot.getId()));
 
-        // 4. Check if we have an open position
-        boolean hasPosition = positionRepo.existsByBotIdAndSymbolAndStatus(
-            bot.getId(), bot.getSymbol(), "OPEN"
-        );
+            String decryptedKey = apiKeyService.decryptApiKey(apiKey);
+            String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
 
-        // 5. Act on signal
-        if (signal.getSignal() == EmaCrossover.Signal.BUY && !hasPosition) {
-            executeBuy(bot, decryptedKey, decryptedSecret, signal);
-        } else if (signal.getSignal() == EmaCrossover.Signal.SELL && hasPosition) {
-            executeSell(bot, decryptedKey, decryptedSecret, signal);
+            // 2. Fetch candles (100 candles)
+            List<double[]> candles = binance.getCandles(bot.getSymbol(), bot.getTimeframe(), 100);
+
+            if (candles.size() < 50) {
+                log.warn("Bot {}: Only {} candles available, need at least 50. Skipping.", bot.getId(), candles.size());
+                return;
+            }
+
+            // Sort oldest → newest (Binance returns oldest first already)
+            List<Double> closingPrices = candles.stream()
+                .map(c -> c[4]) // close price
+                .collect(Collectors.toList());
+
+            // 3. Evaluate strategy with dynamic EMA params
+            EmaCrossover.SignalResult signal = EmaCrossover.evaluate(
+                closingPrices, bot.getFastEma(), bot.getSlowEma()
+            );
+            log.info("Bot {} [{}] signal: {} - {}", bot.getId(), bot.getSymbol(), signal.getSignal(), signal.getReason());
+
+            // 4. Act on signal
+            if (signal.getSignal() == EmaCrossover.Signal.BUY && !bot.isHasOpenPosition()) {
+                executeBuy(bot, decryptedKey, decryptedSecret, signal);
+            } else if (signal.getSignal() == EmaCrossover.Signal.SELL && bot.isHasOpenPosition()) {
+                executeSell(bot, decryptedKey, decryptedSecret, signal);
+            }
+        } finally {
+            // Always reset processing flag
+            bot.setProcessing(false);
+            botRepo.save(bot);
         }
     }
 
     private void executeBuy(TradingBot bot, String apiKey, String secret,
                             EmaCrossover.SignalResult signal) {
-        // Calculate position size: riskPercent of balance
+        // Calculate position size
         var balances = binance.getBalances(apiKey, secret);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
-        BigDecimal allocationAmount = usdtBalance.multiply(bot.getRiskPercent())
+        if (usdtBalance.compareTo(BigDecimal.ONE) <= 0) {
+            log.warn("Bot {}: USDT balance too low ({}), skipping buy", bot.getId(), usdtBalance);
+            return;
+        }
+
+        BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
             .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
 
         BigDecimal currentPrice = BigDecimal.valueOf(signal.getPrice());
+        if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Bot {}: Invalid price {}, skipping", bot.getId(), currentPrice);
+            return;
+        }
+
         BigDecimal quantity = allocationAmount.divide(currentPrice, 6, RoundingMode.DOWN);
 
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
@@ -97,7 +144,9 @@ public class StrategyRunner {
             return;
         }
 
-        log.info("Bot {}: Executing BUY {} {} @ ~{}", bot.getId(), quantity, bot.getSymbol(), currentPrice);
+        log.info("Bot {}: BUY {} {} @ ~{} ({}% of {} USDT = {} USDT)",
+            bot.getId(), quantity, bot.getSymbol(), currentPrice,
+            bot.getTradeSizePercent(), usdtBalance, allocationAmount);
 
         // Place order
         BinanceClient.OrderResult result = binance.placeMarketOrder(
@@ -119,7 +168,14 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        // Open position
+        // Update bot state
+        bot.setHasOpenPosition(true);
+        bot.setEntryPrice(result.getAvgPrice());
+        bot.setQuantity(result.getExecutedQty());
+        bot.setLastTradeTime(Instant.now());
+        botRepo.save(bot);
+
+        // Open position record
         TradePosition position = new TradePosition();
         position.setBotId(bot.getId());
         position.setUserId(bot.getUserId());
@@ -133,22 +189,23 @@ public class StrategyRunner {
         // Publish events
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
         publisher.publishPositionOpened(bot.getUserId().toString(), position);
+
+        log.info("Bot {}: BUY order filled. Entry={}, Qty={}", bot.getId(), result.getAvgPrice(), result.getExecutedQty());
     }
 
     private void executeSell(TradingBot bot, String apiKey, String secret,
                              EmaCrossover.SignalResult signal) {
-        TradePosition position = positionRepo
-            .findByBotIdAndSymbolAndStatus(bot.getId(), bot.getSymbol(), "OPEN")
-            .orElse(null);
+        if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Bot {}: No quantity to sell", bot.getId());
+            return;
+        }
 
-        if (position == null) return;
-
-        log.info("Bot {}: Executing SELL {} {} @ ~{}", bot.getId(), position.getQuantity(),
-            bot.getSymbol(), signal.getPrice());
+        log.info("Bot {}: SELL {} {} @ ~{}",
+            bot.getId(), bot.getQuantity(), bot.getSymbol(), signal.getPrice());
 
         // Place sell order
         BinanceClient.OrderResult result = binance.placeMarketOrder(
-            apiKey, secret, bot.getSymbol(), "SELL", position.getQuantity()
+            apiKey, secret, bot.getSymbol(), "SELL", bot.getQuantity()
         );
 
         // Save order
@@ -166,30 +223,36 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        // Close position
-        BigDecimal pnl = result.getAvgPrice().subtract(position.getEntryPrice())
-            .multiply(position.getQuantity());
+        // Calculate PnL
+        BigDecimal pnl = BigDecimal.ZERO;
+        if (bot.getEntryPrice() != null) {
+            pnl = result.getAvgPrice().subtract(bot.getEntryPrice()).multiply(bot.getQuantity());
+        }
 
-        position.setStatus("CLOSED");
-        position.setExitPrice(result.getAvgPrice());
-        position.setRealizedPnl(pnl);
-        position.setClosedAt(Instant.now());
-        positionRepo.save(position);
+        // Close position
+        TradePosition position = positionRepo
+            .findByBotIdAndSymbolAndStatus(bot.getId(), bot.getSymbol(), "OPEN")
+            .orElse(null);
+
+        if (position != null) {
+            position.setStatus("CLOSED");
+            position.setExitPrice(result.getAvgPrice());
+            position.setRealizedPnl(pnl);
+            position.setClosedAt(Instant.now());
+            positionRepo.save(position);
+            publisher.publishPositionClosed(bot.getUserId().toString(), position, pnl);
+        }
+
+        // Reset bot state
+        bot.setHasOpenPosition(false);
+        bot.setEntryPrice(null);
+        bot.setQuantity(null);
+        bot.setLastTradeTime(Instant.now());
+        botRepo.save(bot);
 
         // Publish events
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
-        publisher.publishPositionClosed(bot.getUserId().toString(), position, pnl);
-    }
 
-    private String mapTimeframe(String timeframe) {
-        return switch (timeframe.toLowerCase()) {
-            case "1m" -> "1m";
-            case "5m" -> "5m";
-            case "15m" -> "15m";
-            case "1h" -> "1h";
-            case "4h" -> "4h";
-            case "1d" -> "1d";
-            default -> "1h";
-        };
+        log.info("Bot {}: SELL order filled. Exit={}, PnL={}", bot.getId(), result.getAvgPrice(), pnl);
     }
 }

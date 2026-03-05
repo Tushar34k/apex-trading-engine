@@ -1,26 +1,30 @@
 package com.tradeengine.controller;
 
+import com.tradeengine.exchange.BinanceClient;
 import com.tradeengine.model.UserApiKey;
+import com.tradeengine.repository.ApiKeyRepository;
 import com.tradeengine.service.ApiKeyService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static com.tradeengine.controller.UserController.getUserId;
 
 @RestController
-@RequestMapping("/api/api-keys")
+@RequestMapping("/api/keys")
 @RequiredArgsConstructor
+@Slf4j
 public class ApiKeyController {
 
-    private final ApiKeyService service;
-    private final com.tradeengine.exchange.BinanceClient binance;
+    private final ApiKeyService apiKeyService;
+    private final ApiKeyRepository apiKeyRepo;
+    private final BinanceClient binanceClient;
 
     @Data
     public static class AddKeyRequest {
@@ -32,59 +36,49 @@ public class ApiKeyController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Map<String, Object>>> list() {
-        var keys = service.listForUser(getUserId());
-        var result = keys.stream().map(k -> Map.<String, Object>of(
-            "id", k.getId(),
-            "exchange", k.getExchange(),
-            "label", k.getLabel(),
-            "permissions", k.getPermissions(),
-            "isActive", k.isActive(),
-            "createdAt", k.getCreatedAt().toString(),
-            "lastUsedAt", k.getLastUsedAt() != null ? k.getLastUsedAt().toString() : "",
-            "maskedKey", "••••" + k.getApiKeyEncrypted().substring(Math.max(0, k.getApiKeyEncrypted().length() - 4))
-        )).toList();
+    public ResponseEntity<?> list() {
+        var keys = apiKeyService.listForUser(getUserId());
+        var result = keys.stream().map(k -> {
+            Map<String, Object> map = new HashMap<>();
+            map.put("id", k.getId());
+            map.put("exchange", k.getExchange());
+            map.put("label", k.getLabel());
+            map.put("permissions", k.getPermissions());
+            map.put("isActive", k.isActive());
+            map.put("createdAt", k.getCreatedAt() != null ? k.getCreatedAt().toString() : null);
+            map.put("lastUsedAt", k.getLastUsedAt() != null ? k.getLastUsedAt().toString() : null);
+            map.put("maskedKey", "****");
+            return map;
+        }).toList();
         return ResponseEntity.ok(result);
     }
 
     @PostMapping
     public ResponseEntity<?> add(@Valid @RequestBody AddKeyRequest req) {
-        var key = service.addKey(getUserId(), req.getExchange(), req.getLabel(),
+        var key = apiKeyService.addKey(getUserId(), req.getExchange(), req.getLabel(),
             req.getApiKey(), req.getApiSecret(), req.getPermissions());
         return ResponseEntity.ok(Map.of("id", key.getId(), "label", key.getLabel()));
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable String id) {
-        service.deleteKey(java.util.UUID.fromString(id), getUserId());
-        return ResponseEntity.ok().build();
+        apiKeyService.deleteKey(UUID.fromString(id), getUserId());
+        return ResponseEntity.ok(Map.of("success", true));
     }
 
     @PostMapping("/{id}/test")
     public ResponseEntity<?> test(@PathVariable String id) {
-        var key = service.listForUser(getUserId()).stream()
-            .filter(k -> k.getId().equals(java.util.UUID.fromString(id)))
-            .findFirst().orElse(null);
-        if (key == null) return ResponseEntity.notFound().build();
+        var key = apiKeyRepo.findById(UUID.fromString(id)).orElse(null);
+        if (key == null || !key.getUserId().equals(getUserId())) {
+            return ResponseEntity.status(404).body(Map.of("valid", false, "message", "Key not found"));
+        }
         try {
-            String decKey = service.decryptApiKey(key);
-            String decSecret = service.decryptApiSecret(key);
-            var balances = binance.getBalances(decKey, decSecret);
-            return ResponseEntity.ok(Map.of(
-                "valid", true,
-                "permissions", java.util.List.of("SPOT_TRADING", "READ"),
-                "futuresEnabled", false,
-                "spotEnabled", true,
-                "message", "Connection successful. Found " + balances.size() + " assets."
-            ));
+            String decryptedKey = apiKeyService.decryptApiKey(key);
+            String decryptedSecret = apiKeyService.decryptApiSecret(key);
+            var balances = binanceClient.getBalances(decryptedKey, decryptedSecret);
+            return ResponseEntity.ok(Map.of("valid", true, "message", "Connected. Found " + balances.size() + " assets."));
         } catch (Exception e) {
-            return ResponseEntity.ok(Map.of(
-                "valid", false,
-                "permissions", java.util.List.of(),
-                "futuresEnabled", false,
-                "spotEnabled", false,
-                "message", "Connection failed: " + e.getMessage()
-            ));
+            return ResponseEntity.ok(Map.of("valid", false, "message", "Failed: " + e.getMessage()));
         }
     }
 }

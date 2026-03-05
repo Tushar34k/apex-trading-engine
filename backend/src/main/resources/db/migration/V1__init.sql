@@ -7,16 +7,6 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Roles
-CREATE TYPE app_role AS ENUM ('ADMIN', 'USER', 'VIEWER');
-
-CREATE TABLE user_roles (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-    role app_role NOT NULL,
-    UNIQUE (user_id, role)
-);
-
 -- API Keys (AES-256 encrypted)
 CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -31,31 +21,41 @@ CREATE TABLE api_keys (
     last_used_at TIMESTAMP
 );
 
--- Strategies
-CREATE TABLE strategies (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    version VARCHAR(20) NOT NULL,
-    type VARCHAR(50) NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
 -- Trading Bots
 CREATE TABLE trading_bots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id) NOT NULL,
-    strategy_id UUID REFERENCES strategies(id) NOT NULL,
-    api_key_id UUID REFERENCES api_keys(id) NOT NULL,
+    name VARCHAR(100) NOT NULL,
     symbol VARCHAR(20) NOT NULL,
-    timeframe VARCHAR(10) NOT NULL DEFAULT '1h',
-    mode VARCHAR(20) NOT NULL DEFAULT 'LIVE',
+    timeframe VARCHAR(10) NOT NULL DEFAULT '1m',
+    strategy_type VARCHAR(50) NOT NULL DEFAULT 'EMA_CROSS',
+    fast_ema INTEGER NOT NULL DEFAULT 9,
+    slow_ema INTEGER NOT NULL DEFAULT 21,
+    trade_size_percent DECIMAL(5,2) NOT NULL DEFAULT 10,
+    api_key_id UUID REFERENCES api_keys(id) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'STOPPED',
-    risk_percent DECIMAL(5,2) NOT NULL DEFAULT 1.5,
+    has_open_position BOOLEAN DEFAULT FALSE,
+    entry_price DECIMAL(20,8),
+    quantity DECIMAL(20,8),
     created_at TIMESTAMP DEFAULT NOW(),
     started_at TIMESTAMP,
-    stopped_at TIMESTAMP
+    stopped_at TIMESTAMP,
+    last_trade_time TIMESTAMP,
+    is_processing BOOLEAN DEFAULT FALSE
+);
+
+-- Trades
+CREATE TABLE trades (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bot_id UUID REFERENCES trading_bots(id) NOT NULL,
+    symbol VARCHAR(20) NOT NULL,
+    side VARCHAR(10) NOT NULL,
+    entry_price DECIMAL(20,8) NOT NULL,
+    exit_price DECIMAL(20,8),
+    quantity DECIMAL(20,8) NOT NULL,
+    pnl DECIMAL(20,8),
+    opened_at TIMESTAMP DEFAULT NOW(),
+    closed_at TIMESTAMP
 );
 
 -- Orders
@@ -76,7 +76,7 @@ CREATE TABLE orders (
     filled_at TIMESTAMP
 );
 
--- Positions
+-- Positions (open positions for dashboard)
 CREATE TABLE positions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     bot_id UUID REFERENCES trading_bots(id),
@@ -86,21 +86,9 @@ CREATE TABLE positions (
     quantity DECIMAL(20,8) NOT NULL,
     entry_price DECIMAL(20,8) NOT NULL,
     current_price DECIMAL(20,8),
-    stop_loss DECIMAL(20,8),
-    take_profit DECIMAL(20,8),
     status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
     opened_at TIMESTAMP DEFAULT NOW(),
     closed_at TIMESTAMP,
     exit_price DECIMAL(20,8),
     realized_pnl DECIMAL(20,8)
-);
-
--- Insert default EMA crossover strategy
-INSERT INTO strategies (id, name, description, version, type)
-VALUES (
-    'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    'EMA Crossover',
-    'EMA 9/21 crossover strategy. Buys when EMA9 crosses above EMA21, sells when below.',
-    'v1.0',
-    'TREND_FOLLOWING'
 );

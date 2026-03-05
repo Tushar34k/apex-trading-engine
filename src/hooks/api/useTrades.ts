@@ -9,24 +9,18 @@ export function usePositions() {
   });
 }
 
-export function useOrders(params?: { botId?: string; status?: string; symbol?: string }) {
+export function useOrders(params?: { botId?: string }) {
   return useQuery({
     queryKey: ['orders', params],
     queryFn: () => ordersApi.list(params),
+    refetchInterval: 5000,
   });
 }
 
-export function useTrades(params?: { botId?: string; status?: string; symbol?: string; mode?: string }) {
+export function useTrades(params?: { botId?: string }) {
   return useQuery({
     queryKey: ['trades', params],
     queryFn: () => tradesApi.list(params),
-  });
-}
-
-export function useTradeDetail(tradeId: string | null) {
-  return useQuery({
-    queryKey: ['trade-detail', tradeId],
-    queryFn: () => tradesApi.get(tradeId!),
-    enabled: !!tradeId,
+    refetchInterval: 5000,
   });
 }

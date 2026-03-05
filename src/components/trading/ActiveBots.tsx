@@ -1,4 +1,4 @@
-import { Bot, Circle, TrendingUp, TrendingDown, Play, Square } from "lucide-react";
+import { Bot, Circle, Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBots, useStartBot, useStopBot } from "@/hooks/api/useBots";
 import type { TradingBot } from "@/types";
@@ -28,7 +28,8 @@ export function ActiveBots() {
       ) : (
         <div className="divide-y divide-border/50">
           {bots.map((bot: TradingBot) => {
-            const isProfitable = bot.pnl >= 0;
+            const pnl = bot.pnl ?? 0;
+            const isProfitable = pnl >= 0;
             return (
               <div key={bot.id} className="flex items-center justify-between px-4 py-3 hover:bg-surface-2 transition-colors">
                 <div className="flex items-center gap-3">
@@ -37,29 +38,32 @@ export function ActiveBots() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{bot.strategyName}</span>
-                      <Circle className={cn("h-1.5 w-1.5 fill-current", bot.status === "RUNNING" ? "text-profit" : bot.status === "PAUSED" ? "text-warning" : "text-muted-foreground")} />
+                      <span className="text-sm font-medium text-foreground">{bot.name}</span>
+                      <Circle className={cn("h-1.5 w-1.5 fill-current", bot.status === "RUNNING" ? "text-profit" : "text-muted-foreground")} />
                     </div>
-                    <div className="text-[11px] text-muted-foreground">{bot.strategyVersion} · {bot.symbol} · {bot.mode}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {bot.symbol} · {bot.timeframe} · EMA({bot.fastEma}/{bot.slowEma}) · {bot.tradeSizePercent}%
+                    </div>
+                    {bot.hasOpenPosition && (
+                      <div className="text-[10px] text-warning font-mono">
+                        OPEN @ ${bot.entryPrice?.toLocaleString()} · Qty: {bot.quantity}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className={cn("font-mono text-sm font-semibold", isProfitable ? "text-profit" : "text-loss")}>
-                      {isProfitable ? '+' : ''}${bot.pnl.toFixed(2)}
+                      {isProfitable ? '+' : ''}${pnl.toFixed(2)}
                     </div>
                     <div className="text-[10px] text-muted-foreground">
-                      {bot.totalTrades} trades · {(bot.winRate * 100).toFixed(0)}% win
+                      {bot.totalTrades ?? 0} trades · {((bot.winRate ?? 0) * 100).toFixed(0)}% win
                     </div>
                   </div>
-                  {isProfitable ? (
-                    <TrendingUp className="h-4 w-4 text-profit" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 text-loss" />
-                  )}
                   <button
                     onClick={() => bot.status === 'RUNNING' ? stopBot.mutate(bot.id) : startBot.mutate(bot.id)}
-                    className={cn("rounded-md p-1.5 transition-colors", bot.status === 'RUNNING' ? "text-warning hover:bg-warning/10" : "text-profit hover:bg-profit/10")}
+                    disabled={startBot.isPending || stopBot.isPending}
+                    className={cn("rounded-md p-1.5 transition-colors", bot.status === 'RUNNING' ? "text-loss hover:bg-loss/10" : "text-profit hover:bg-profit/10")}
                   >
                     {bot.status === 'RUNNING' ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                   </button>

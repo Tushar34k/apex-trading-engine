@@ -1,74 +1,62 @@
-import { DollarSign, TrendingUp, BarChart3, Shield, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
-import { StatCard } from "@/components/ui/stat-card";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { PositionsTable } from "@/components/trading/PositionsTable";
 import { ActiveBots } from "@/components/trading/ActiveBots";
-import { EquityCurve } from "@/components/trading/EquityCurve";
+import { TradeHistory } from "@/components/trading/TradeHistory";
 import { CreateBotDialog } from "@/components/trading/CreateBotDialog";
-import { useAnalytics } from "@/hooks/api/useAnalytics";
-import { useRiskStatus } from "@/hooks/api/useRisk";
+import { useBots } from "@/hooks/api/useBots";
 
 const Dashboard = () => {
   const [createBotOpen, setCreateBotOpen] = useState(false);
-  const { data: perf } = useAnalytics();
-  const { data: riskStatus } = useRiskStatus();
+  const { data: botsList } = useBots();
+
+  const runningBots = botsList?.filter((b) => b.status === 'RUNNING') ?? [];
+  const totalPnl = botsList?.reduce((sum, b) => sum + (b.pnl ?? 0), 0) ?? 0;
+  const totalTrades = botsList?.reduce((sum, b) => sum + (b.totalTrades ?? 0), 0) ?? 0;
 
   return (
     <div className="space-y-6 animate-slide-up">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Real-time trading overview</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Binance TESTNET · EMA Crossover Strategy</p>
+        </div>
+        <button
+          onClick={() => setCreateBotOpen(true)}
+          className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+        >
+          <Plus className="h-4 w-4" /> Create Bot
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Portfolio Value"
-          value={perf ? `$${perf.totalReturn.toLocaleString()}` : '—'}
-          change={perf ? `${perf.totalReturnPercent >= 0 ? '+' : ''}${perf.totalReturnPercent.toFixed(1)}%` : '—'}
-          changeType={perf && perf.totalReturnPercent >= 0 ? "profit" : "loss"}
-          icon={DollarSign}
-        />
-        <StatCard
-          label="Total Trades"
-          value={perf ? String(perf.totalTrades) : '—'}
-          change={perf ? `${perf.winRate.toFixed(1)}% win rate` : '—'}
-          changeType="neutral"
-          icon={TrendingUp}
-        />
-        <StatCard
-          label="Win Rate"
-          value={perf ? `${perf.winRate.toFixed(1)}%` : '—'}
-          change={perf ? `Sharpe: ${perf.sharpeRatio.toFixed(2)}` : '—'}
-          changeType="profit"
-          icon={BarChart3}
-        />
-        <StatCard
-          label="Risk Exposure"
-          value={riskStatus ? `${riskStatus.totalExposure.toFixed(1)}%` : '—'}
-          change={riskStatus ? (riskStatus.allChecksPassed ? 'Within limits' : `${riskStatus.violations.length} violations`) : '—'}
-          changeType={riskStatus?.allChecksPassed ? "neutral" : "loss"}
-          icon={Shield}
-        />
+      {/* Stats row */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-xs text-muted-foreground uppercase">Running Bots</div>
+          <div className="mt-1 text-2xl font-bold text-foreground">{runningBots.length}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-xs text-muted-foreground uppercase">Total Trades</div>
+          <div className="mt-1 text-2xl font-bold text-foreground">{totalTrades}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-xs text-muted-foreground uppercase">Total P&L</div>
+          <div className={`mt-1 text-2xl font-bold font-mono ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+            {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="xl:col-span-2">
           <TradingChart />
         </div>
-        <div className="space-y-4">
-          <button
-            onClick={() => setCreateBotOpen(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border bg-card px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-          >
-            <Plus className="h-4 w-4" /> Create Bot
-          </button>
-          <ActiveBots />
-        </div>
+        <ActiveBots />
       </div>
 
-      <EquityCurve />
       <PositionsTable />
+      <TradeHistory />
 
       <CreateBotDialog open={createBotOpen} onOpenChange={setCreateBotOpen} />
     </div>
