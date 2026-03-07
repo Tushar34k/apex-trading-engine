@@ -43,6 +43,7 @@ public class StrategyRunner {
     private final RiskManagementService riskService;
     private final TrailingStopService trailingStopService;
     private final NotificationService notificationService;
+    private final BinanceStreamClient streamClient;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
