@@ -167,4 +167,16 @@ export const backtest = {
     client.post<BacktestResult>('/backtest/run', data).then((r) => r.data),
 };
 
+export interface ExecutionMetrics {
+  queueSize: number;
+  totalSubmitted: number;
+  totalExecuted: number;
+  totalFailed: number;
+}
+
+export const execution = {
+  metrics: () =>
+    client.get<ExecutionMetrics>('/execution/metrics').then((r) => r.data),
+};
+
 export default client;

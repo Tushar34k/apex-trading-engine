@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tradeengine.exchange.BinanceClient;
 import com.tradeengine.exchange.SymbolInfo;
 import com.tradeengine.exchange.SymbolInfoCache;
+import com.tradeengine.execution.TradeExecutionQueue;
+import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
 import com.tradeengine.service.ApiKeyService;
@@ -44,12 +46,12 @@ public class StrategyRunner {
     private final TrailingStopService trailingStopService;
     private final NotificationService notificationService;
     private final BinanceStreamClient streamClient;
+    private final TradeExecutionQueue executionQueue;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
     private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(60);
-    private static final int MAX_ORDER_RETRIES = 3;
 
     @Scheduled(fixedDelay = 30000)
     public void runStrategies() {
@@ -96,7 +98,6 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                // Read price from WebSocket cache first, fallback to REST
                 Double cachedPrice = streamClient.getLatestPrice(bot.getSymbol());
                 BigDecimal currentPrice = cachedPrice != null
                     ? BigDecimal.valueOf(cachedPrice)
@@ -107,9 +108,8 @@ public class StrategyRunner {
                     double tsPct = ((Number) params.get("trailingStopPercent")).doubleValue();
                     if (trailingStopService.checkTrailingStop(bot.getId(), currentPrice, bot.getEntryPrice(), tsPct)) {
                         log.warn("Bot {} TRAILING STOP triggered @ {}", bot.getId(), currentPrice);
-                        executeSell(bot, decryptedKey, decryptedSecret,
-                            new TradingStrategy.SignalResult(TradingStrategy.Signal.SELL, currentPrice.doubleValue(),
-                                "Trailing stop triggered"), exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL");
+                        submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
+                            "Trailing stop triggered", exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL");
                         return;
                     }
                 }
@@ -121,9 +121,8 @@ public class StrategyRunner {
                         BigDecimal.ONE.subtract(BigDecimal.valueOf(slPct / 100)));
                     if (currentPrice.compareTo(slPrice) <= 0) {
                         log.warn("Bot {} STOP-LOSS triggered: price {} <= SL {}", bot.getId(), currentPrice, slPrice);
-                        executeSell(bot, decryptedKey, decryptedSecret,
-                            new TradingStrategy.SignalResult(TradingStrategy.Signal.SELL, currentPrice.doubleValue(),
-                                "Stop-loss triggered at " + slPct + "%"), exchangeBaseUrl, symbolInfo, "BOT_SL");
+                        submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
+                            "Stop-loss triggered at " + slPct + "%", exchangeBaseUrl, symbolInfo, "BOT_SL");
                         return;
                     }
                 }
@@ -135,9 +134,8 @@ public class StrategyRunner {
                         BigDecimal.ONE.add(BigDecimal.valueOf(tpPct / 100)));
                     if (currentPrice.compareTo(tpPrice) >= 0) {
                         log.info("Bot {} TAKE-PROFIT triggered: price {} >= TP {}", bot.getId(), currentPrice, tpPrice);
-                        executeSell(bot, decryptedKey, decryptedSecret,
-                            new TradingStrategy.SignalResult(TradingStrategy.Signal.SELL, currentPrice.doubleValue(),
-                                "Take-profit triggered at " + tpPct + "%"), exchangeBaseUrl, symbolInfo, "BOT_TP");
+                        submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
+                            "Take-profit triggered at " + tpPct + "%", exchangeBaseUrl, symbolInfo, "BOT_TP");
                         return;
                     }
                 }
@@ -152,7 +150,7 @@ public class StrategyRunner {
 
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
 
-            // --- Inject order book depth data into params for ORDER_BOOK strategy ---
+            // Inject order book depth
             double[] depth = streamClient.getDepth(bot.getSymbol());
             if (depth != null) {
                 params.put("bidVolume", depth[0]);
@@ -170,9 +168,11 @@ public class StrategyRunner {
                 bot.getId(), bot.getName(), bot.getStrategyType(), signal.signal(), signal.reason());
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
-                executeBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params);
+                submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
-                executeSell(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, "BOT_SELL");
+                submitSell(bot, decryptedKey, decryptedSecret,
+                    BigDecimal.valueOf(signal.price()), signal.reason(),
+                    exchangeBaseUrl, symbolInfo, "BOT_SELL");
             }
         } finally {
             bot.setProcessing(false);
@@ -180,13 +180,15 @@ public class StrategyRunner {
         }
     }
 
-    private void executeBuy(TradingBot bot, String apiKey, String secret,
-                            TradingStrategy.SignalResult signal, String exchangeBaseUrl,
-                            SymbolInfo symbolInfo, Map<String, Object> params) {
+    /**
+     * Submit BUY trade to the execution queue instead of executing directly.
+     */
+    private void submitBuy(TradingBot bot, String apiKey, String secret,
+                           TradingStrategy.SignalResult signal, String exchangeBaseUrl,
+                           SymbolInfo symbolInfo, Map<String, Object> params) {
         var balances = binance.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
-        // Risk management check
         RiskManagementService.RiskCheck riskCheck = riskService.validateBuy(bot, usdtBalance, params);
         if (!riskCheck.allowed()) {
             log.warn("Bot {} RISK BLOCKED: {}", bot.getId(), riskCheck.reason());
@@ -214,11 +216,85 @@ public class StrategyRunner {
             }
         }
 
-        log.info("Bot {} [{}]: BUY {} {} @ ~{}", bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice);
+        log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue",
+            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice);
 
-        BinanceClient.OrderResult result = executeOrderWithRetry(apiKey, secret, bot.getSymbol(), "BUY", quantity, exchangeBaseUrl);
-        if (result == null) return;
+        TradeRequest request = TradeRequest.builder()
+            .botId(bot.getId())
+            .userId(bot.getUserId())
+            .symbol(bot.getSymbol())
+            .side("BUY")
+            .quantity(quantity)
+            .orderType("MARKET")
+            .apiKey(apiKey)
+            .apiSecret(secret)
+            .exchangeBaseUrl(exchangeBaseUrl)
+            .notificationType("BOT_BUY")
+            .timestamp(Instant.now())
+            .build();
 
+        executionQueue.submitTrade(request);
+
+        // Handle result asynchronously
+        request.getResultFuture().thenAccept(result -> {
+            if (result.isSuccess()) {
+                handleBuyFilled(bot, result);
+            } else {
+                log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
+            }
+        });
+    }
+
+    /**
+     * Submit SELL trade to the execution queue.
+     */
+    private void submitSell(TradingBot bot, String apiKey, String secret,
+                            BigDecimal currentPrice, String reason,
+                            String exchangeBaseUrl, SymbolInfo symbolInfo,
+                            String notificationType) {
+        if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
+
+        BigDecimal quantity = bot.getQuantity();
+        if (symbolInfo != null) {
+            quantity = symbolInfo.roundQuantity(quantity);
+            if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Bot {}: sell quantity rounds to 0", bot.getId());
+                return;
+            }
+        }
+
+        log.info("Bot {} [{}]: Submitting SELL {} {} @ ~{} ({}) to execution queue",
+            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, notificationType);
+
+        TradeRequest request = TradeRequest.builder()
+            .botId(bot.getId())
+            .userId(bot.getUserId())
+            .symbol(bot.getSymbol())
+            .side("SELL")
+            .quantity(quantity)
+            .orderType("MARKET")
+            .apiKey(apiKey)
+            .apiSecret(secret)
+            .exchangeBaseUrl(exchangeBaseUrl)
+            .notificationType(notificationType)
+            .timestamp(Instant.now())
+            .build();
+
+        executionQueue.submitTrade(request);
+
+        request.getResultFuture().thenAccept(result -> {
+            if (result.isSuccess()) {
+                handleSellFilled(bot, result, notificationType);
+            } else {
+                log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
+            }
+        });
+    }
+
+    /**
+     * Post-fill handler for BUY orders — persists order, position, and updates bot state.
+     */
+    private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
         order.setUserId(bot.getUserId());
@@ -254,28 +330,14 @@ public class StrategyRunner {
         notificationService.notifyBuy(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
             result.getAvgPrice(), result.getExecutedQty());
 
-        log.info("Bot {} [{}]: BUY filled. Entry={}, Qty={}", bot.getId(), bot.getName(), result.getAvgPrice(), result.getExecutedQty());
+        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}",
+            bot.getId(), bot.getName(), result.getAvgPrice(), result.getExecutedQty());
     }
 
-    private void executeSell(TradingBot bot, String apiKey, String secret,
-                             TradingStrategy.SignalResult signal, String exchangeBaseUrl,
-                             SymbolInfo symbolInfo, String notificationType) {
-        if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
-
-        BigDecimal quantity = bot.getQuantity();
-        if (symbolInfo != null) {
-            quantity = symbolInfo.roundQuantity(quantity);
-            if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
-                log.warn("Bot {}: sell quantity rounds to 0", bot.getId());
-                return;
-            }
-        }
-
-        log.info("Bot {} [{}]: SELL {} {} @ ~{} ({})", bot.getId(), bot.getName(), quantity, bot.getSymbol(), signal.price(), notificationType);
-
-        BinanceClient.OrderResult result = executeOrderWithRetry(apiKey, secret, bot.getSymbol(), "SELL", quantity, exchangeBaseUrl);
-        if (result == null) return;
-
+    /**
+     * Post-fill handler for SELL orders — closes position, calculates PnL.
+     */
+    private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
         order.setUserId(bot.getUserId());
@@ -312,12 +374,9 @@ public class StrategyRunner {
         bot.setLastTradeTime(Instant.now());
         botRepo.save(bot);
 
-        // Reset trailing stop tracking
         trailingStopService.resetBot(bot.getId());
-
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
 
-        // Send typed notification
         String userId = bot.getUserId().toString();
         switch (notificationType) {
             case "BOT_SL" -> notificationService.notifyStopLoss(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
@@ -326,28 +385,8 @@ public class StrategyRunner {
             default -> notificationService.notifySell(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
         }
 
-        log.info("Bot {} [{}]: SELL filled. Exit={}, PnL={}", bot.getId(), bot.getName(), result.getAvgPrice(), pnl);
-    }
-
-    /**
-     * Retry order execution up to MAX_ORDER_RETRIES times.
-     */
-    private BinanceClient.OrderResult executeOrderWithRetry(String apiKey, String secret,
-                                                             String symbol, String side,
-                                                             BigDecimal quantity, String baseUrl) {
-        for (int attempt = 1; attempt <= MAX_ORDER_RETRIES; attempt++) {
-            try {
-                return binance.placeMarketOrder(apiKey, secret, symbol, side, quantity, baseUrl);
-            } catch (Exception e) {
-                log.error("Order attempt {}/{} failed for {} {} {}: {}",
-                    attempt, MAX_ORDER_RETRIES, side, quantity, symbol, e.getMessage());
-                if (attempt < MAX_ORDER_RETRIES) {
-                    try { Thread.sleep(1000L * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                }
-            }
-        }
-        log.error("All {} order attempts failed for {} {}", MAX_ORDER_RETRIES, side, symbol);
-        return null;
+        log.info("Bot {} [{}]: SELL filled via queue. Exit={}, PnL={}",
+            bot.getId(), bot.getName(), result.getAvgPrice(), pnl);
     }
 
     private String resolveExchangeUrl(String exchangeMode) {
