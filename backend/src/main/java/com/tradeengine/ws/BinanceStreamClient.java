@@ -10,6 +10,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
@@ -17,7 +18,7 @@ import java.util.function.BiConsumer;
 
 /**
  * Connects to Binance WebSocket streams for real-time market data.
- * Subscribes to trade, kline (multi-timeframe), and depth streams per symbol.
+ * Maintains timestamped price cache for staleness detection.
  */
 @Component
 @Slf4j
@@ -25,12 +26,15 @@ public class BinanceStreamClient {
 
     private static final String WS_BASE = "wss://stream.binance.com:9443/stream?streams=";
     private static final String TESTNET_WS_BASE = "wss://testnet.binance.vision/stream?streams=";
+    private static final long STALE_THRESHOLD_MS = 5000;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
 
     // Price cache: symbol -> latest price
     private final ConcurrentHashMap<String, Double> priceCache = new ConcurrentHashMap<>();
+    // Price timestamp cache: symbol -> last update epoch millis
+    private final ConcurrentHashMap<String, Long> priceTimestamps = new ConcurrentHashMap<>();
     // Candle cache: "SYMBOL:timeframe" -> latest kline data [time, open, high, low, close, volume]
     private final ConcurrentHashMap<String, double[]> candleCache = new ConcurrentHashMap<>();
     // Order book depth cache: symbol -> [totalBidVolume, totalAskVolume]
@@ -46,16 +50,11 @@ public class BinanceStreamClient {
         this.priceUpdateListener = listener;
     }
 
-    /**
-     * Subscribe to real-time price updates for a symbol.
-     * Includes trade, multi-timeframe klines, and depth streams.
-     */
     public void subscribe(String symbol, boolean testnet) {
         String sym = symbol.toLowerCase();
         if (subscribedSymbols.contains(sym)) return;
         subscribedSymbols.add(sym);
 
-        // Multi-timeframe klines + trade + depth
         String streams = sym + "@trade/"
             + sym + "@kline_1m/"
             + sym + "@kline_5m/"
@@ -77,27 +76,46 @@ public class BinanceStreamClient {
         }
         String upper = symbol.toUpperCase();
         priceCache.remove(upper);
+        priceTimestamps.remove(upper);
         depthCache.remove(upper);
-        // Remove all timeframe candles
         candleCache.entrySet().removeIf(e -> e.getKey().startsWith(upper + ":"));
         log.info("[Stream] Unsubscribed from {}", symbol);
     }
 
+    /**
+     * Get latest cached price. Returns null if no data available.
+     */
     public Double getLatestPrice(String symbol) {
         return priceCache.get(symbol.toUpperCase());
     }
 
-    /** Get candle for a specific timeframe, e.g. getCandle("BTCUSDT", "5m") */
+    /**
+     * Check if the cached price is fresh (updated within STALE_THRESHOLD_MS).
+     */
+    public boolean isPriceFresh(String symbol) {
+        Long ts = priceTimestamps.get(symbol.toUpperCase());
+        if (ts == null) return false;
+        return (System.currentTimeMillis() - ts) < STALE_THRESHOLD_MS;
+    }
+
+    /**
+     * Get latest price only if fresh, otherwise return null (caller should fallback to REST).
+     */
+    public Double getFreshPrice(String symbol) {
+        if (isPriceFresh(symbol)) {
+            return priceCache.get(symbol.toUpperCase());
+        }
+        return null;
+    }
+
     public double[] getCandle(String symbol, String timeframe) {
         return candleCache.get(symbol.toUpperCase() + ":" + timeframe);
     }
 
-    /** Legacy: get 1m candle */
     public double[] getLatestCandle(String symbol) {
         return getCandle(symbol, "1m");
     }
 
-    /** Get order book depth: returns [totalBidVolume, totalAskVolume] or null */
     public double[] getDepth(String symbol) {
         return depthCache.get(symbol.toUpperCase());
     }
@@ -158,12 +176,12 @@ public class BinanceStreamClient {
             JsonNode root = mapper.readTree(json);
             JsonNode data = root.has("data") ? root.get("data") : root;
             String eventType = data.has("e") ? data.get("e").asText() : "";
-
             String symbol = data.has("s") ? data.get("s").asText() : sym.toUpperCase();
 
             if ("trade".equals(eventType)) {
                 double price = data.get("p").asDouble();
                 priceCache.put(symbol, price);
+                priceTimestamps.put(symbol, System.currentTimeMillis());
                 if (priceUpdateListener != null) {
                     priceUpdateListener.accept(symbol, price);
                 }
@@ -179,10 +197,9 @@ public class BinanceStreamClient {
                     k.get("v").asDouble()
                 };
                 candleCache.put(symbol + ":" + interval, candle);
-                // Update price from kline close
                 priceCache.put(symbol, candle[4]);
+                priceTimestamps.put(symbol, System.currentTimeMillis());
             } else if ("depthUpdate".equals(eventType) || data.has("bids")) {
-                // Partial depth update (depth20@100ms)
                 processDepth(data, symbol);
             }
         } catch (Exception e) {
@@ -192,23 +209,16 @@ public class BinanceStreamClient {
 
     private void processDepth(JsonNode data, String symbol) {
         try {
-            double totalBid = 0;
-            double totalAsk = 0;
-
+            double totalBid = 0, totalAsk = 0;
             JsonNode bids = data.get("bids");
             JsonNode asks = data.get("asks");
 
             if (bids != null && bids.isArray()) {
-                for (JsonNode bid : bids) {
-                    totalBid += bid.get(1).asDouble();
-                }
+                for (JsonNode bid : bids) totalBid += bid.get(1).asDouble();
             }
             if (asks != null && asks.isArray()) {
-                for (JsonNode ask : asks) {
-                    totalAsk += ask.get(1).asDouble();
-                }
+                for (JsonNode ask : asks) totalAsk += ask.get(1).asDouble();
             }
-
             depthCache.put(symbol, new double[]{totalBid, totalAsk});
         } catch (Exception e) {
             log.debug("[Stream] Depth parse error for {}: {}", symbol, e.getMessage());

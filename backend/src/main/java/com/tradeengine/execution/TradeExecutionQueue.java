@@ -7,14 +7,15 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Serialized trade execution queue with kill switch, circuit breaker, and capacity monitoring.
+ * Serialized trade execution queue with per-bot duplicate protection,
+ * kill switch integration, circuit breaker, and capacity monitoring.
  */
 @Service
 @Slf4j
@@ -31,6 +32,9 @@ public class TradeExecutionQueue {
     private final BlockingQueue<TradeRequest> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean running = new AtomicBoolean(true);
 
+    // Per-bot pending trade protection
+    private final ConcurrentHashMap<UUID, Boolean> pendingTrades = new ConcurrentHashMap<>();
+
     private final AtomicLong totalSubmitted = new AtomicLong();
     private final AtomicLong totalExecuted = new AtomicLong();
     private final AtomicLong totalFailed = new AtomicLong();
@@ -44,17 +48,29 @@ public class TradeExecutionQueue {
         this.workerThread = new Thread(this::processLoop, "trade-execution-worker");
         this.workerThread.setDaemon(true);
         this.workerThread.start();
-        log.info("TradeExecutionQueue started — worker thread active");
+        log.info("TradeExecutionQueue started — capacity={}", QUEUE_CAPACITY);
     }
 
     public void submitTrade(TradeRequest request) {
-        // Kill switch check
+        // Kill switch gate
         if (killSwitch.isActive()) {
-            log.warn("[QUEUE] Trade rejected — kill switch active: {} {} {}",
-                request.getSide(), request.getSymbol(), request.getBotId());
+            log.warn("[TRADE_REJECTED] botId={} symbol={} side={} qty={} reason=kill_switch_active",
+                request.getBotId(), request.getSymbol(), request.getSide(), request.getQuantity());
             request.getResultFuture().complete(TradeRequest.TradeResult.builder()
                 .success(false)
                 .errorMessage("Kill switch active: " + killSwitch.getActivationReason())
+                .build());
+            totalFailed.incrementAndGet();
+            return;
+        }
+
+        // Per-bot duplicate protection
+        if (pendingTrades.putIfAbsent(request.getBotId(), true) != null) {
+            log.warn("[TRADE_REJECTED] botId={} symbol={} side={} reason=pending_trade_exists",
+                request.getBotId(), request.getSymbol(), request.getSide());
+            request.getResultFuture().complete(TradeRequest.TradeResult.builder()
+                .success(false)
+                .errorMessage("Bot already has a pending trade in queue")
                 .build());
             totalFailed.incrementAndGet();
             return;
@@ -64,32 +80,36 @@ public class TradeExecutionQueue {
 
         // Queue capacity monitoring
         int currentSize = queue.size();
-        if (currentSize >= QUEUE_CAPACITY * QUEUE_WARNING_THRESHOLD) {
-            log.warn("[QUEUE] WARNING: Queue at {}% capacity ({}/{})",
-                (int)(currentSize * 100.0 / QUEUE_CAPACITY), currentSize, QUEUE_CAPACITY);
+        double usagePercent = currentSize * 100.0 / QUEUE_CAPACITY;
+        if (usagePercent >= QUEUE_WARNING_THRESHOLD * 100) {
+            log.warn("[QUEUE_WARNING] capacity={}% ({}/{}) — approaching limit",
+                (int) usagePercent, currentSize, QUEUE_CAPACITY);
         }
 
-        log.info("[QUEUE] Trade received: {} {} {} qty={} bot={}",
-                request.getSide(), request.getSymbol(), request.getOrderType(),
-                request.getQuantity(), request.getBotId());
+        log.info("[TRADE_SUBMITTED] botId={} symbol={} side={} qty={} type={} queueSize={}",
+            request.getBotId(), request.getSymbol(), request.getSide(),
+            request.getQuantity(), request.getOrderType(), currentSize + 1);
 
         if (!queue.offer(request)) {
-            log.error("[QUEUE] Queue full! Rejecting trade for bot {}", request.getBotId());
+            log.error("[TRADE_REJECTED] botId={} symbol={} side={} reason=queue_full",
+                request.getBotId(), request.getSymbol(), request.getSide());
+            pendingTrades.remove(request.getBotId());
             request.getResultFuture().complete(TradeRequest.TradeResult.builder()
-                    .success(false)
-                    .errorMessage("Execution queue full")
-                    .build());
+                .success(false)
+                .errorMessage("Execution queue full")
+                .build());
             totalFailed.incrementAndGet();
         }
     }
 
     /**
-     * Cancel all pending trades in the queue (used by kill switch).
+     * Cancel all pending trades in the queue (called by kill switch).
      */
     public int cancelPendingTrades() {
         int cancelled = 0;
         TradeRequest req;
         while ((req = queue.poll()) != null) {
+            pendingTrades.remove(req.getBotId());
             req.getResultFuture().complete(TradeRequest.TradeResult.builder()
                 .success(false)
                 .errorMessage("Trade cancelled — kill switch activated")
@@ -97,7 +117,7 @@ public class TradeExecutionQueue {
             cancelled++;
         }
         if (cancelled > 0) {
-            log.warn("[QUEUE] Cancelled {} pending trades due to kill switch", cancelled);
+            log.warn("[KILL_SWITCH] Cancelled {} pending queue trades", cancelled);
         }
         return cancelled;
     }
@@ -108,54 +128,53 @@ public class TradeExecutionQueue {
                 TradeRequest req = queue.poll(1, TimeUnit.SECONDS);
                 if (req == null) continue;
 
-                // Re-check kill switch before executing
+                // Re-check kill switch
                 if (killSwitch.isActive()) {
-                    log.warn("[QUEUE] Trade skipped — kill switch active: {} {} {}",
-                        req.getSide(), req.getSymbol(), req.getBotId());
+                    log.warn("[TRADE_FAILED] botId={} symbol={} side={} reason=kill_switch_active",
+                        req.getBotId(), req.getSymbol(), req.getSide());
+                    pendingTrades.remove(req.getBotId());
                     req.getResultFuture().complete(TradeRequest.TradeResult.builder()
-                        .success(false)
-                        .errorMessage("Kill switch active")
-                        .build());
+                        .success(false).errorMessage("Kill switch active").build());
                     totalFailed.incrementAndGet();
                     continue;
                 }
 
                 // Circuit breaker check
                 if (!circuitBreaker.isAllowed()) {
-                    log.warn("[QUEUE] Trade delayed — circuit breaker open: {} {} {}",
-                        req.getSide(), req.getSymbol(), req.getBotId());
-                    // Re-queue the trade
+                    log.warn("[TRADE_DELAYED] botId={} symbol={} side={} reason=circuit_breaker_open",
+                        req.getBotId(), req.getSymbol(), req.getSide());
                     if (!queue.offer(req)) {
+                        pendingTrades.remove(req.getBotId());
                         req.getResultFuture().complete(TradeRequest.TradeResult.builder()
-                            .success(false)
-                            .errorMessage("Circuit breaker open and queue full")
-                            .build());
+                            .success(false).errorMessage("Circuit breaker open and queue full").build());
                         totalFailed.incrementAndGet();
                     }
-                    Thread.sleep(1000); // Wait before retrying
+                    Thread.sleep(1000);
                     continue;
                 }
 
-                log.info("[QUEUE] Trade executing: {} {} {} qty={} bot={}",
-                        req.getSide(), req.getSymbol(), req.getOrderType(),
-                        req.getQuantity(), req.getBotId());
+                log.info("[TRADE_EXECUTING] botId={} symbol={} side={} qty={} type={}",
+                    req.getBotId(), req.getSymbol(), req.getSide(),
+                    req.getQuantity(), req.getOrderType());
 
                 TradeRequest.TradeResult result = executeWithRetry(req);
 
+                // Clear per-bot pending lock
+                pendingTrades.remove(req.getBotId());
+
                 if (result.isSuccess()) {
                     totalExecuted.incrementAndGet();
-                    log.info("[QUEUE] Trade success: {} {} {} orderId={} avgPrice={}",
-                            req.getSide(), req.getSymbol(), result.getExecutedQty(),
-                            result.getOrderId(), result.getAvgPrice());
+                    log.info("[TRADE_EXECUTED] botId={} symbol={} side={} qty={} orderId={} avgPrice={}",
+                        req.getBotId(), req.getSymbol(), req.getSide(),
+                        result.getExecutedQty(), result.getOrderId(), result.getAvgPrice());
                 } else {
                     totalFailed.incrementAndGet();
-                    log.error("[QUEUE] Trade failed: {} {} {} error={}",
-                            req.getSide(), req.getSymbol(), req.getQuantity(),
-                            result.getErrorMessage());
+                    log.error("[TRADE_FAILED] botId={} symbol={} side={} qty={} error={}",
+                        req.getBotId(), req.getSymbol(), req.getSide(),
+                        req.getQuantity(), result.getErrorMessage());
                 }
 
                 req.getResultFuture().complete(result);
-
                 Thread.sleep(RATE_LIMIT_DELAY_MS);
 
             } catch (InterruptedException e) {
@@ -172,50 +191,42 @@ public class TradeExecutionQueue {
     private TradeRequest.TradeResult executeWithRetry(TradeRequest req) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                BinanceClient.OrderResult orderResult;
-                if ("MARKET".equals(req.getOrderType())) {
-                    orderResult = binance.placeMarketOrder(
-                            req.getApiKey(), req.getApiSecret(),
-                            req.getSymbol(), req.getSide(),
-                            req.getQuantity(), req.getExchangeBaseUrl());
-                } else {
-                    orderResult = binance.placeMarketOrder(
-                            req.getApiKey(), req.getApiSecret(),
-                            req.getSymbol(), req.getSide(),
-                            req.getQuantity(), req.getExchangeBaseUrl());
-                }
+                BinanceClient.OrderResult orderResult = binance.placeMarketOrder(
+                    req.getApiKey(), req.getApiSecret(),
+                    req.getSymbol(), req.getSide(),
+                    req.getQuantity(), req.getExchangeBaseUrl());
 
                 return TradeRequest.TradeResult.builder()
-                        .success(true)
-                        .orderId(orderResult.getOrderId())
-                        .executedQty(orderResult.getExecutedQty())
-                        .avgPrice(orderResult.getAvgPrice())
-                        .build();
+                    .success(true)
+                    .orderId(orderResult.getOrderId())
+                    .executedQty(orderResult.getExecutedQty())
+                    .avgPrice(orderResult.getAvgPrice())
+                    .build();
 
             } catch (Exception e) {
-                log.error("[QUEUE] Attempt {}/{} failed for {} {} {}: {}",
-                        attempt, MAX_RETRIES, req.getSide(), req.getQuantity(),
-                        req.getSymbol(), e.getMessage());
+                log.error("[TRADE_RETRY] botId={} symbol={} side={} attempt={}/{} error={}",
+                    req.getBotId(), req.getSymbol(), req.getSide(),
+                    attempt, MAX_RETRIES, e.getMessage());
                 circuitBreaker.recordFailure();
                 killSwitch.recordExchangeError();
                 if (attempt < MAX_RETRIES) {
-                    try {
-                        Thread.sleep(1000L * attempt);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                    try { Thread.sleep(1000L * attempt); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
                 }
             }
         }
 
         return TradeRequest.TradeResult.builder()
-                .success(false)
-                .errorMessage("All " + MAX_RETRIES + " attempts failed")
-                .build();
+            .success(false)
+            .errorMessage("All " + MAX_RETRIES + " attempts failed")
+            .build();
     }
 
+    // --- Metrics ---
     public int getQueueSize() { return queue.size(); }
+    public int getQueueCapacity() { return QUEUE_CAPACITY; }
+    public double getQueueUsagePercent() { return queue.size() * 100.0 / QUEUE_CAPACITY; }
+    public int getPendingBotsCount() { return pendingTrades.size(); }
     public long getTotalSubmitted() { return totalSubmitted.get(); }
     public long getTotalExecuted() { return totalExecuted.get(); }
     public long getTotalFailed() { return totalFailed.get(); }
@@ -224,17 +235,13 @@ public class TradeExecutionQueue {
     public void shutdown() {
         log.info("[QUEUE] Shutting down — draining {} remaining trades", queue.size());
         running.set(false);
-        try {
-            workerThread.join(10_000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        try { workerThread.join(10_000); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         TradeRequest remaining;
         while ((remaining = queue.poll()) != null) {
+            pendingTrades.remove(remaining.getBotId());
             remaining.getResultFuture().complete(TradeRequest.TradeResult.builder()
-                    .success(false)
-                    .errorMessage("System shutting down")
-                    .build());
+                .success(false).errorMessage("System shutting down").build());
         }
         log.info("[QUEUE] Shutdown complete. Executed={}, Failed={}", totalExecuted.get(), totalFailed.get());
     }
