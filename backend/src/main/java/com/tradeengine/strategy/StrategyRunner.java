@@ -11,6 +11,7 @@ import com.tradeengine.service.ApiKeyService;
 import com.tradeengine.service.NotificationService;
 import com.tradeengine.service.RiskManagementService;
 import com.tradeengine.service.TrailingStopService;
+import com.tradeengine.ws.BinanceStreamClient;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
