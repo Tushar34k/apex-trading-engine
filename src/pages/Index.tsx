@@ -1,5 +1,6 @@
-import { Plus, Wallet } from "lucide-react";
+import { Plus, Wallet, Activity } from "lucide-react";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { PositionsTable } from "@/components/trading/PositionsTable";
 import { ActiveBots } from "@/components/trading/ActiveBots";
@@ -8,6 +9,7 @@ import { CreateBotDialog } from "@/components/trading/CreateBotDialog";
 import { NotificationPanel } from "@/components/trading/NotificationPanel";
 import { useBots } from "@/hooks/api/useBots";
 import { useAccountBalance } from "@/hooks/api/useAccountBalance";
+import { execution } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
