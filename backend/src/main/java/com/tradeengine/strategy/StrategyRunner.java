@@ -483,6 +483,7 @@ public class StrategyRunner {
         botRepo.save(bot);
 
         trailingStopService.resetBot(bot.getId());
+        positionTracker.removePosition(bot.getId());
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
 
         String userId = bot.getUserId().toString();
