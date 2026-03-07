@@ -1,7 +1,9 @@
 package com.tradeengine.controller;
 
 import com.tradeengine.model.TradingBot;
+import com.tradeengine.model.TradePosition;
 import com.tradeengine.repository.BotRepository;
+import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.service.BotService;
 import com.tradeengine.strategy.StrategyFactory;
 import jakarta.validation.Valid;
@@ -23,6 +25,7 @@ public class BotController {
 
     private final BotService botService;
     private final BotRepository botRepo;
+    private final PositionRepository positionRepo;
 
     @Data
     public static class CreateBotRequest {
@@ -47,13 +50,11 @@ public class BotController {
 
     @PostMapping
     public ResponseEntity<?> create(@Valid @RequestBody CreateBotRequest req) {
-        // Validate strategy type
         if (!StrategyFactory.exists(req.getStrategyType())) {
             return ResponseEntity.badRequest().body(Map.of("message",
                 "Unknown strategy: " + req.getStrategyType()));
         }
 
-        // Validate exchange mode
         String mode = req.getExchangeMode();
         if (mode == null || (!mode.equals("TESTNET") && !mode.equals("LIVE"))) {
             mode = "TESTNET";
@@ -95,7 +96,34 @@ public class BotController {
         return ResponseEntity.ok(toMap(bot));
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> delete(@PathVariable String id) {
+        UUID botId = UUID.fromString(id);
+        var bot = botRepo.findById(botId).orElse(null);
+        if (bot == null) return ResponseEntity.notFound().build();
+        if (!bot.getUserId().equals(getUserId())) return ResponseEntity.status(403).build();
+        if ("RUNNING".equals(bot.getStatus())) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Stop bot before deleting"));
+        }
+        botRepo.delete(bot);
+        return ResponseEntity.ok(Map.of("deleted", true));
+    }
+
     private Map<String, Object> toMap(TradingBot b) {
+        // Compute real PnL and trade count from positions table
+        List<TradePosition> allPositions = positionRepo.findByBotId(b.getId());
+        BigDecimal totalPnl = BigDecimal.ZERO;
+        int totalTrades = 0;
+        int wins = 0;
+        for (TradePosition p : allPositions) {
+            if ("CLOSED".equals(p.getStatus()) && p.getRealizedPnl() != null) {
+                totalPnl = totalPnl.add(p.getRealizedPnl());
+                totalTrades++;
+                if (p.getRealizedPnl().compareTo(BigDecimal.ZERO) > 0) wins++;
+            }
+        }
+        double winRate = totalTrades > 0 ? (double) wins / totalTrades * 100 : 0;
+
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", b.getId());
         map.put("userId", b.getUserId());
@@ -117,9 +145,9 @@ public class BotController {
         map.put("stoppedAt", b.getStoppedAt() != null ? b.getStoppedAt().toString() : null);
         map.put("lastTradeTime", b.getLastTradeTime() != null ? b.getLastTradeTime().toString() : null);
         map.put("isProcessing", b.isProcessing());
-        map.put("pnl", 0);
-        map.put("totalTrades", 0);
-        map.put("winRate", 0);
+        map.put("pnl", totalPnl);
+        map.put("totalTrades", totalTrades);
+        map.put("winRate", Math.round(winRate * 10) / 10.0);
         return map;
     }
 }

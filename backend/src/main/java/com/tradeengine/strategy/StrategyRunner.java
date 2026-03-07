@@ -3,6 +3,8 @@ package com.tradeengine.strategy;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.SymbolInfo;
+import com.tradeengine.exchange.SymbolInfoCache;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
 import com.tradeengine.service.ApiKeyService;
@@ -21,14 +23,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Runs every 30 seconds. For each RUNNING bot:
- * 1. Skip if isProcessing
- * 2. Skip if trade cooldown not met (60s min)
- * 3. Resolve exchange endpoint from bot.exchangeMode
- * 4. Fetch candles
- * 5. Resolve strategy from bot.strategyType
- * 6. Parse strategyParams JSON
- * 7. Execute BUY or SELL if signal
+ * Core execution loop. Runs every 30s for RUNNING bots.
+ * Includes: SL/TP checks, LOT_SIZE validation, minNotional, cooldown, processing guard.
  */
 @Service
 @RequiredArgsConstructor
@@ -41,6 +37,7 @@ public class StrategyRunner {
     private final OrderRepository orderRepo;
     private final PositionRepository positionRepo;
     private final BinanceClient binance;
+    private final SymbolInfoCache symbolInfoCache;
     private final TradeEventPublisher publisher;
     private final ObjectMapper objectMapper;
 
@@ -57,7 +54,7 @@ public class StrategyRunner {
             try {
                 processBot(bot);
             } catch (Exception e) {
-                log.error("Error processing bot {}: {}", bot.getId(), e.getMessage(), e);
+                log.error("Bot {} error: {}", bot.getId(), e.getMessage(), e);
                 bot.setProcessing(false);
                 botRepo.save(bot);
             }
@@ -65,16 +62,17 @@ public class StrategyRunner {
     }
 
     private void processBot(TradingBot bot) {
+        // --- Guard: already processing ---
         if (bot.isProcessing()) {
-            log.debug("Bot {} is already processing, skipping", bot.getId());
+            log.debug("Bot {} already processing, skip", bot.getId());
             return;
         }
 
+        // --- Guard: trade cooldown ---
         if (bot.getLastTradeTime() != null) {
-            Duration sinceLastTrade = Duration.between(bot.getLastTradeTime(), Instant.now());
-            if (sinceLastTrade.compareTo(TRADE_COOLDOWN) < 0) {
-                log.debug("Bot {} cooldown active ({}s remaining)", bot.getId(),
-                    TRADE_COOLDOWN.minus(sinceLastTrade).toSeconds());
+            Duration since = Duration.between(bot.getLastTradeTime(), Instant.now());
+            if (since.compareTo(TRADE_COOLDOWN) < 0) {
+                log.debug("Bot {} cooldown ({}s left)", bot.getId(), TRADE_COOLDOWN.minus(since).toSeconds());
                 return;
             }
         }
@@ -83,48 +81,80 @@ public class StrategyRunner {
         botRepo.save(bot);
 
         try {
-            // Resolve exchange base URL
             String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode());
 
-            // Get API keys
+            // Decrypt API credentials
             UserApiKey apiKey = apiKeyRepo.findById(bot.getApiKeyId())
                 .orElseThrow(() -> new RuntimeException("API key not found for bot " + bot.getId()));
-
             String decryptedKey = apiKeyService.decryptApiKey(apiKey);
             String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
 
-            // Fetch candles
-            List<double[]> candles = binance.getCandles(bot.getSymbol(), bot.getTimeframe(), 100, exchangeBaseUrl);
+            // Pre-fetch symbol info for LOT_SIZE validation
+            SymbolInfo symbolInfo = symbolInfoCache.getOrFetch(bot.getSymbol(), exchangeBaseUrl);
 
+            // --- Check stop-loss / take-profit BEFORE strategy ---
+            if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
+                Map<String, Object> params = parseStrategyParams(bot);
+                BigDecimal currentPrice = binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
+
+                // Stop-loss check
+                if (params.containsKey("stopLossPercent")) {
+                    double slPct = ((Number) params.get("stopLossPercent")).doubleValue();
+                    BigDecimal slPrice = bot.getEntryPrice().multiply(
+                        BigDecimal.ONE.subtract(BigDecimal.valueOf(slPct / 100)));
+                    if (currentPrice.compareTo(slPrice) <= 0) {
+                        log.warn("Bot {} STOP-LOSS triggered: price {} <= SL {}", bot.getId(), currentPrice, slPrice);
+                        executeSell(bot, decryptedKey, decryptedSecret,
+                            new TradingStrategy.SignalResult(TradingStrategy.Signal.SELL, currentPrice.doubleValue(),
+                                "Stop-loss triggered at " + slPct + "%"),
+                            exchangeBaseUrl, symbolInfo);
+                        return;
+                    }
+                }
+
+                // Take-profit check
+                if (params.containsKey("takeProfitPercent")) {
+                    double tpPct = ((Number) params.get("takeProfitPercent")).doubleValue();
+                    BigDecimal tpPrice = bot.getEntryPrice().multiply(
+                        BigDecimal.ONE.add(BigDecimal.valueOf(tpPct / 100)));
+                    if (currentPrice.compareTo(tpPrice) >= 0) {
+                        log.info("Bot {} TAKE-PROFIT triggered: price {} >= TP {}", bot.getId(), currentPrice, tpPrice);
+                        executeSell(bot, decryptedKey, decryptedSecret,
+                            new TradingStrategy.SignalResult(TradingStrategy.Signal.SELL, currentPrice.doubleValue(),
+                                "Take-profit triggered at " + tpPct + "%"),
+                            exchangeBaseUrl, symbolInfo);
+                        return;
+                    }
+                }
+            }
+
+            // --- Fetch candles ---
+            List<double[]> candles = binance.getCandles(bot.getSymbol(), bot.getTimeframe(), 100, exchangeBaseUrl);
             if (candles.size() < 50) {
-                log.warn("Bot {}: Only {} candles available, need 50+. Skipping.", bot.getId(), candles.size());
+                log.warn("Bot {}: only {} candles, need 50+. Skip.", bot.getId(), candles.size());
                 return;
             }
 
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
 
-            // Resolve strategy
+            // --- Resolve & evaluate strategy ---
             TradingStrategy strategy = StrategyFactory.get(bot.getStrategyType());
-
-            // Parse strategy params
             Map<String, Object> params = parseStrategyParams(bot);
-            // Inject fastEma/slowEma from bot fields as defaults
             params.putIfAbsent("fastEma", bot.getFastEma());
             params.putIfAbsent("slowEma", bot.getSlowEma());
 
-            // Evaluate
             TradingStrategy.SignalResult signal = strategy.evaluate(
                 closingPrices, candles, params, bot.isHasOpenPosition()
             );
 
-            log.info("Bot {} [{}] strategy={} signal={} - {}",
+            log.info("Bot {} [{}] strategy={} signal={} reason={}",
                 bot.getId(), bot.getSymbol(), bot.getStrategyType(), signal.signal(), signal.reason());
 
-            // Act on signal
+            // --- Act on signal ---
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
-                executeBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl);
+                executeBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
-                executeSell(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl);
+                executeSell(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo);
             }
         } finally {
             bot.setProcessing(false);
@@ -132,31 +162,11 @@ public class StrategyRunner {
         }
     }
 
-    private String resolveExchangeUrl(String exchangeMode) {
-        if ("LIVE".equalsIgnoreCase(exchangeMode)) {
-            if (!liveTradingEnabled) {
-                log.warn("Live trading disabled. Forcing TESTNET.");
-                return "https://testnet.binance.vision";
-            }
-            return "https://api.binance.com";
-        }
-        return "https://testnet.binance.vision";
-    }
-
-    private Map<String, Object> parseStrategyParams(TradingBot bot) {
-        if (bot.getStrategyParams() == null || bot.getStrategyParams().isBlank()) {
-            return new HashMap<>();
-        }
-        try {
-            return objectMapper.readValue(bot.getStrategyParams(), new TypeReference<>() {});
-        } catch (Exception e) {
-            log.warn("Bot {}: Failed to parse strategyParams: {}", bot.getId(), e.getMessage());
-            return new HashMap<>();
-        }
-    }
+    // ---- Order execution ----
 
     private void executeBuy(TradingBot bot, String apiKey, String secret,
-                            TradingStrategy.SignalResult signal, String exchangeBaseUrl) {
+                            TradingStrategy.SignalResult signal, String exchangeBaseUrl,
+                            SymbolInfo symbolInfo) {
         var balances = binance.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
@@ -171,8 +181,23 @@ public class StrategyRunner {
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        BigDecimal quantity = allocationAmount.divide(currentPrice, 6, RoundingMode.DOWN);
-        if (quantity.compareTo(BigDecimal.ZERO) <= 0) return;
+        BigDecimal rawQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+
+        // Apply LOT_SIZE rounding
+        BigDecimal quantity = symbolInfo != null ? symbolInfo.roundQuantity(rawQty) : rawQty.setScale(6, RoundingMode.DOWN);
+        if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE", bot.getId());
+            return;
+        }
+
+        // Validate against Binance rules
+        if (symbolInfo != null) {
+            String error = symbolInfo.validate(quantity, currentPrice);
+            if (error != null) {
+                log.warn("Bot {}: LOT_SIZE validation failed: {}", bot.getId(), error);
+                return;
+            }
+        }
 
         log.info("Bot {}: BUY {} {} @ ~{}", bot.getId(), quantity, bot.getSymbol(), currentPrice);
 
@@ -220,13 +245,25 @@ public class StrategyRunner {
     }
 
     private void executeSell(TradingBot bot, String apiKey, String secret,
-                             TradingStrategy.SignalResult signal, String exchangeBaseUrl) {
+                             TradingStrategy.SignalResult signal, String exchangeBaseUrl,
+                             SymbolInfo symbolInfo) {
         if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
 
-        log.info("Bot {}: SELL {} {} @ ~{}", bot.getId(), bot.getQuantity(), bot.getSymbol(), signal.price());
+        BigDecimal quantity = bot.getQuantity();
+
+        // Apply LOT_SIZE rounding to sell quantity
+        if (symbolInfo != null) {
+            quantity = symbolInfo.roundQuantity(quantity);
+            if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Bot {}: sell quantity rounds to 0", bot.getId());
+                return;
+            }
+        }
+
+        log.info("Bot {}: SELL {} {} @ ~{}", bot.getId(), quantity, bot.getSymbol(), signal.price());
 
         BinanceClient.OrderResult result = binance.placeMarketOrder(
-            apiKey, secret, bot.getSymbol(), "SELL", bot.getQuantity(), exchangeBaseUrl
+            apiKey, secret, bot.getSymbol(), "SELL", quantity, exchangeBaseUrl
         );
 
         TradeOrder order = new TradeOrder();
@@ -267,5 +304,30 @@ public class StrategyRunner {
 
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
         log.info("Bot {}: SELL filled. Exit={}, PnL={}", bot.getId(), result.getAvgPrice(), pnl);
+    }
+
+    // ---- Helpers ----
+
+    private String resolveExchangeUrl(String exchangeMode) {
+        if ("LIVE".equalsIgnoreCase(exchangeMode)) {
+            if (!liveTradingEnabled) {
+                log.warn("Live trading disabled. Forcing TESTNET.");
+                return "https://testnet.binance.vision";
+            }
+            return "https://api.binance.com";
+        }
+        return "https://testnet.binance.vision";
+    }
+
+    private Map<String, Object> parseStrategyParams(TradingBot bot) {
+        if (bot.getStrategyParams() == null || bot.getStrategyParams().isBlank()) {
+            return new HashMap<>();
+        }
+        try {
+            return objectMapper.readValue(bot.getStrategyParams(), new TypeReference<>() {});
+        } catch (Exception e) {
+            log.warn("Bot {}: bad strategyParams JSON: {}", bot.getId(), e.getMessage());
+            return new HashMap<>();
+        }
     }
 }
