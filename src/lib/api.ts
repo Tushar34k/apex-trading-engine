@@ -174,9 +174,38 @@ export interface ExecutionMetrics {
   totalFailed: number;
 }
 
+export interface SystemMetrics {
+  queueSize: number;
+  totalSubmitted: number;
+  totalExecuted: number;
+  totalFailed: number;
+  totalBots: number;
+  runningBots: number;
+  openPositions: number;
+  killSwitch: {
+    active: boolean;
+    reason: string | null;
+    activatedAt: string | null;
+  };
+  exchangeHealth: {
+    circuitBreakerOpen: boolean;
+    recentErrors: number;
+    killSwitchErrors: number;
+  };
+}
+
 export const execution = {
   metrics: () =>
     client.get<ExecutionMetrics>('/execution/metrics').then((r) => r.data),
+};
+
+export const system = {
+  metrics: () =>
+    client.get<SystemMetrics>('/system/metrics').then((r) => r.data),
+  activateKillSwitch: (reason: string) =>
+    client.post('/system/kill-switch/activate', { reason }).then((r) => r.data),
+  resetKillSwitch: () =>
+    client.post('/system/kill-switch/reset').then((r) => r.data),
 };
 
 export default client;
