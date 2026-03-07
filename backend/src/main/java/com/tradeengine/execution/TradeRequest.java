@@ -13,6 +13,9 @@ import java.util.concurrent.CompletableFuture;
 @Data
 @Builder
 public class TradeRequest {
+    @Builder.Default
+    private final UUID requestId = UUID.randomUUID(); // unique per request for dedup
+
     private final UUID botId;
     private final UUID userId;
     private final String symbol;
@@ -24,12 +27,30 @@ public class TradeRequest {
     private final String apiSecret;
     private final String exchangeBaseUrl;
     private final String exchange;      // BINANCE / DELTA / BYBIT
+    private final String exchangeMode;  // LIVE / TESTNET
     private final String notificationType; // BOT_SELL, BOT_SL, BOT_TP, BOT_TRAILING_SL
     private final Instant timestamp;
 
     // Callback for the submitter to await result
     @Builder.Default
     private final CompletableFuture<TradeResult> resultFuture = new CompletableFuture<>();
+
+    /**
+     * Validates all required fields before submission.
+     * @throws IllegalArgumentException if any required field is missing or invalid
+     */
+    public void validate() {
+        if (exchange == null || exchange.isBlank())
+            throw new IllegalArgumentException("Exchange is required");
+        if (symbol == null || symbol.isBlank())
+            throw new IllegalArgumentException("Symbol is required");
+        if (side == null || side.isBlank())
+            throw new IllegalArgumentException("Side is required");
+        if (quantity == null || quantity.compareTo(BigDecimal.ZERO) <= 0)
+            throw new IllegalArgumentException("Quantity must be greater than 0");
+        if (botId == null)
+            throw new IllegalArgumentException("Bot ID is required");
+    }
 
     @Data
     @Builder

@@ -276,6 +276,7 @@ public class StrategyRunner {
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)
             .exchange(exchangeName)
+            .exchangeMode(bot.getExchangeMode())
             .notificationType("BOT_BUY")
             .timestamp(Instant.now())
             .build();
@@ -335,6 +336,7 @@ public class StrategyRunner {
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)
             .exchange(exchangeName)
+            .exchangeMode(bot.getExchangeMode())
             .notificationType(notificationType)
             .timestamp(Instant.now())
             .build();
