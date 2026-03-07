@@ -44,6 +44,12 @@ public class TradingBot {
     @Column(nullable = false)
     private String status = "STOPPED";
 
+    @Column(name = "exchange_mode", nullable = false)
+    private String exchangeMode = "TESTNET";
+
+    @Column(name = "strategy_params", columnDefinition = "TEXT")
+    private String strategyParams; // JSON string
+
     @Column(name = "has_open_position")
     private boolean hasOpenPosition = false;
 

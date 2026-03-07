@@ -1,41 +1,26 @@
 package com.tradeengine.strategy;
 
-import lombok.Data;
 import java.util.List;
+import java.util.Map;
 
 /**
- * EMA Crossover Strategy with dynamic parameters.
+ * EMA Crossover Strategy.
  * BUY when fastEMA crosses above slowEMA (no open position).
  * SELL when fastEMA crosses below slowEMA (has open position).
  * Spot only. No short selling.
  */
-public class EmaCrossover {
+public class EmaCrossover implements TradingStrategy {
 
-    public enum Signal { BUY, SELL, HOLD }
-
-    @Data
-    public static class SignalResult {
-        private Signal signal;
-        private double fastEmaValue;
-        private double slowEmaValue;
-        private double price;
-        private String reason;
-    }
-
-    /**
-     * Evaluate strategy with dynamic EMA periods.
-     * @param closingPrices list of closing prices (oldest first)
-     * @param fastPeriod fast EMA period (e.g. 9)
-     * @param slowPeriod slow EMA period (e.g. 21)
-     */
-    public static SignalResult evaluate(List<Double> closingPrices, int fastPeriod, int slowPeriod) {
-        SignalResult result = new SignalResult();
-        result.setSignal(Signal.HOLD);
+    @Override
+    public SignalResult evaluate(List<Double> closingPrices, List<double[]> allCandles,
+                                 Map<String, Object> params, boolean hasOpenPosition) {
+        int fastPeriod = getInt(params, "fastEma", 9);
+        int slowPeriod = getInt(params, "slowEma", 21);
 
         int minCandles = slowPeriod + 2;
         if (closingPrices.size() < minCandles) {
-            result.setReason("Insufficient data (need " + minCandles + "+ candles, got " + closingPrices.size() + ")");
-            return result;
+            return new SignalResult(Signal.HOLD, lastPrice(closingPrices),
+                "Insufficient data (need " + minCandles + ", got " + closingPrices.size() + ")");
         }
 
         double[] prices = closingPrices.stream().mapToDouble(d -> d).toArray();
@@ -45,37 +30,46 @@ public class EmaCrossover {
         double prevFast = calculateEMA(prices, fastPeriod, prices.length - 2);
         double prevSlow = calculateEMA(prices, slowPeriod, prices.length - 2);
 
-        result.setFastEmaValue(currentFast);
-        result.setSlowEmaValue(currentSlow);
-        result.setPrice(prices[prices.length - 1]);
-
+        double price = prices[prices.length - 1];
         boolean currentAbove = currentFast > currentSlow;
         boolean previousAbove = prevFast > prevSlow;
 
-        if (currentAbove && !previousAbove) {
-            result.setSignal(Signal.BUY);
-            result.setReason(String.format("EMA(%d)=%.2f crossed above EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
-        } else if (!currentAbove && previousAbove) {
-            result.setSignal(Signal.SELL);
-            result.setReason(String.format("EMA(%d)=%.2f crossed below EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
-        } else {
-            result.setReason(String.format("No crossover. EMA(%d)=%.2f, EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
+        if (!hasOpenPosition && currentAbove && !previousAbove) {
+            return new SignalResult(Signal.BUY, price,
+                String.format("EMA(%d)=%.2f crossed above EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
+        } else if (hasOpenPosition && !currentAbove && previousAbove) {
+            return new SignalResult(Signal.SELL, price,
+                String.format("EMA(%d)=%.2f crossed below EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
         }
 
-        return result;
+        return new SignalResult(Signal.HOLD, price,
+            String.format("No crossover. EMA(%d)=%.2f, EMA(%d)=%.2f", fastPeriod, currentFast, slowPeriod, currentSlow));
     }
 
-    private static double calculateEMA(double[] prices, int period, int endIndex) {
+    public static double calculateEMA(double[] prices, int period, int endIndex) {
         double multiplier = 2.0 / (period + 1);
         int startIndex = Math.max(0, endIndex - period * 3);
         double sum = 0;
+        int count = 0;
         for (int i = startIndex; i < startIndex + period && i <= endIndex; i++) {
             sum += prices[i];
+            count++;
         }
-        double ema = sum / period;
+        double ema = sum / count;
         for (int i = startIndex + period; i <= endIndex; i++) {
             ema = (prices[i] - ema) * multiplier + ema;
         }
         return ema;
+    }
+
+    private double lastPrice(List<Double> prices) {
+        return prices.isEmpty() ? 0 : prices.get(prices.size() - 1);
+    }
+
+    private int getInt(Map<String, Object> params, String key, int defaultVal) {
+        if (params == null || !params.containsKey(key)) return defaultVal;
+        Object v = params.get(key);
+        if (v instanceof Number) return ((Number) v).intValue();
+        try { return Integer.parseInt(v.toString()); } catch (Exception e) { return defaultVal; }
     }
 }

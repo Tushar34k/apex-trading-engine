@@ -24,7 +24,7 @@ import java.util.*;
 public class BinanceClient {
 
     @Value("${exchange.binance.base-url}")
-    private String baseUrl;
+    private String defaultBaseUrl;
 
     @Value("${exchange.binance.recv-window:5000}")
     private long recvWindow;
@@ -35,12 +35,16 @@ public class BinanceClient {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // --- Public endpoints ---
+    // --- Public endpoints (use provided or default base URL) ---
 
     public BigDecimal getTickerPrice(String symbol) {
+        return getTickerPrice(symbol, null);
+    }
+
+    public BigDecimal getTickerPrice(String symbol, String baseUrl) {
         try {
-            String url = baseUrl + "/api/v3/ticker/price?symbol=" + symbol;
-            String body = get(url, null, null);
+            String url = resolveBase(baseUrl) + "/api/v3/ticker/price?symbol=" + symbol;
+            String body = get(url, null);
             JsonNode node = mapper.readTree(body);
             return new BigDecimal(node.get("price").asText());
         } catch (Exception e) {
@@ -50,20 +54,24 @@ public class BinanceClient {
     }
 
     public List<double[]> getCandles(String symbol, String interval, int limit) {
+        return getCandles(symbol, interval, limit, null);
+    }
+
+    public List<double[]> getCandles(String symbol, String interval, int limit, String baseUrl) {
         try {
-            String url = baseUrl + "/api/v3/klines?symbol=" + symbol
+            String url = resolveBase(baseUrl) + "/api/v3/klines?symbol=" + symbol
                 + "&interval=" + interval + "&limit=" + limit;
-            String body = get(url, null, null);
+            String body = get(url, null);
             JsonNode arr = mapper.readTree(body);
             List<double[]> candles = new ArrayList<>();
             for (JsonNode c : arr) {
                 candles.add(new double[]{
-                    c.get(0).asLong() / 1000.0,  // time
-                    c.get(1).asDouble(),           // open
-                    c.get(2).asDouble(),           // high
-                    c.get(3).asDouble(),           // low
-                    c.get(4).asDouble(),           // close
-                    c.get(5).asDouble()            // volume
+                    c.get(0).asLong() / 1000.0,
+                    c.get(1).asDouble(),
+                    c.get(2).asDouble(),
+                    c.get(3).asDouble(),
+                    c.get(4).asDouble(),
+                    c.get(5).asDouble()
                 });
             }
             return candles;
@@ -77,6 +85,11 @@ public class BinanceClient {
 
     public OrderResult placeMarketOrder(String apiKey, String secret, String symbol,
                                          String side, BigDecimal quantity) {
+        return placeMarketOrder(apiKey, secret, symbol, side, quantity, null);
+    }
+
+    public OrderResult placeMarketOrder(String apiKey, String secret, String symbol,
+                                         String side, BigDecimal quantity, String baseUrl) {
         try {
             String params = "symbol=" + symbol
                 + "&side=" + side
@@ -88,7 +101,7 @@ public class BinanceClient {
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
-            String url = baseUrl + "/api/v3/order?" + params;
+            String url = resolveBase(baseUrl) + "/api/v3/order?" + params;
             String body = post(url, apiKey);
             JsonNode node = mapper.readTree(body);
 
@@ -99,7 +112,6 @@ public class BinanceClient {
             result.setStatus(node.get("status").asText());
             result.setExecutedQty(new BigDecimal(node.get("executedQty").asText()));
 
-            // Get avg fill price from fills
             if (node.has("fills") && node.get("fills").size() > 0) {
                 BigDecimal totalQty = BigDecimal.ZERO;
                 BigDecimal totalCost = BigDecimal.ZERO;
@@ -123,13 +135,17 @@ public class BinanceClient {
     }
 
     public Map<String, BigDecimal> getBalances(String apiKey, String secret) {
+        return getBalances(apiKey, secret, null);
+    }
+
+    public Map<String, BigDecimal> getBalances(String apiKey, String secret, String baseUrl) {
         try {
             String params = "recvWindow=" + recvWindow + "&timestamp=" + System.currentTimeMillis();
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
-            String url = baseUrl + "/api/v3/account?" + params;
-            String body = getWithAuth(url, apiKey);
+            String url = resolveBase(baseUrl) + "/api/v3/account?" + params;
+            String body = get(url, apiKey);
             JsonNode node = mapper.readTree(body);
 
             Map<String, BigDecimal> balances = new HashMap<>();
@@ -153,8 +169,8 @@ public class BinanceClient {
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
-            String url = baseUrl + "/api/v3/openOrders?" + params;
-            String body = getWithAuth(url, apiKey);
+            String url = defaultBaseUrl + "/api/v3/openOrders?" + params;
+            String body = get(url, apiKey);
             return List.of(mapper.readTree(body));
         } catch (Exception e) {
             log.error("Failed to get open orders: {}", e.getMessage());
@@ -163,6 +179,10 @@ public class BinanceClient {
     }
 
     // --- Helpers ---
+
+    private String resolveBase(String baseUrl) {
+        return (baseUrl != null && !baseUrl.isBlank()) ? baseUrl : defaultBaseUrl;
+    }
 
     private String sign(String data, String secret) {
         try {
@@ -174,16 +194,12 @@ public class BinanceClient {
         }
     }
 
-    private String get(String url, String apiKey, String unused) throws Exception {
+    private String get(String url, String apiKey) throws Exception {
         var builder = HttpRequest.newBuilder().uri(URI.create(url)).GET();
         if (apiKey != null) builder.header("X-MBX-APIKEY", apiKey);
         var resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         if (resp.statusCode() != 200) throw new RuntimeException("Binance error " + resp.statusCode() + ": " + resp.body());
         return resp.body();
-    }
-
-    private String getWithAuth(String url, String apiKey) throws Exception {
-        return get(url, apiKey, null);
     }
 
     private String post(String url, String apiKey) throws Exception {

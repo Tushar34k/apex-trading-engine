@@ -3,6 +3,7 @@ package com.tradeengine.controller;
 import com.tradeengine.model.TradingBot;
 import com.tradeengine.repository.BotRepository;
 import com.tradeengine.service.BotService;
+import com.tradeengine.strategy.StrategyFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
@@ -33,6 +34,8 @@ public class BotController {
         private int slowEma = 21;
         private BigDecimal tradeSizePercent = new BigDecimal("10");
         @NotBlank private String apiKeyId;
+        private String exchangeMode = "TESTNET";
+        private String strategyParams; // JSON string
     }
 
     @GetMapping
@@ -44,6 +47,18 @@ public class BotController {
 
     @PostMapping
     public ResponseEntity<?> create(@Valid @RequestBody CreateBotRequest req) {
+        // Validate strategy type
+        if (!StrategyFactory.exists(req.getStrategyType())) {
+            return ResponseEntity.badRequest().body(Map.of("message",
+                "Unknown strategy: " + req.getStrategyType()));
+        }
+
+        // Validate exchange mode
+        String mode = req.getExchangeMode();
+        if (mode == null || (!mode.equals("TESTNET") && !mode.equals("LIVE"))) {
+            mode = "TESTNET";
+        }
+
         TradingBot bot = new TradingBot();
         bot.setUserId(getUserId());
         bot.setName(req.getName());
@@ -54,6 +69,8 @@ public class BotController {
         bot.setSlowEma(req.getSlowEma());
         bot.setTradeSizePercent(req.getTradeSizePercent());
         bot.setApiKeyId(UUID.fromString(req.getApiKeyId()));
+        bot.setExchangeMode(mode);
+        bot.setStrategyParams(req.getStrategyParams());
         bot = botRepo.save(bot);
         return ResponseEntity.ok(toMap(bot));
     }
@@ -79,7 +96,7 @@ public class BotController {
     }
 
     private Map<String, Object> toMap(TradingBot b) {
-        Map<String, Object> map = new HashMap<>();
+        Map<String, Object> map = new LinkedHashMap<>();
         map.put("id", b.getId());
         map.put("userId", b.getUserId());
         map.put("name", b.getName());
@@ -90,6 +107,8 @@ public class BotController {
         map.put("slowEma", b.getSlowEma());
         map.put("tradeSizePercent", b.getTradeSizePercent());
         map.put("status", b.getStatus());
+        map.put("exchangeMode", b.getExchangeMode());
+        map.put("strategyParams", b.getStrategyParams());
         map.put("hasOpenPosition", b.isHasOpenPosition());
         map.put("entryPrice", b.getEntryPrice());
         map.put("quantity", b.getQuantity());
@@ -98,7 +117,6 @@ public class BotController {
         map.put("stoppedAt", b.getStoppedAt() != null ? b.getStoppedAt().toString() : null);
         map.put("lastTradeTime", b.getLastTradeTime() != null ? b.getLastTradeTime().toString() : null);
         map.put("isProcessing", b.isProcessing());
-        // Computed — will be 0 for now, real values come from trades table
         map.put("pnl", 0);
         map.put("totalTrades", 0);
         map.put("winRate", 0);
