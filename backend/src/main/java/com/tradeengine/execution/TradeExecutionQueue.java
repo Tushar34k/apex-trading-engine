@@ -182,10 +182,14 @@ public class TradeExecutionQueue {
     }
 
     private TradeRequest.TradeResult executeWithRetry(TradeRequest req) {
-        // Resolve exchange client dynamically
-        ExchangeClient exchangeClient = exchangeFactory.getClient(
-            req.getExchange() != null ? req.getExchange() : "BINANCE"
-        );
+        // Resolve exchange client dynamically — exchange field is mandatory
+        if (req.getExchange() == null || req.getExchange().isBlank()) {
+            return TradeRequest.TradeResult.builder()
+                .success(false)
+                .errorMessage("Exchange field is required — cannot default to any exchange")
+                .build();
+        }
+        ExchangeClient exchangeClient = exchangeFactory.getClient(req.getExchange());
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {

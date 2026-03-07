@@ -229,7 +229,11 @@ public class StrategyRunner {
         log.info("Executing trade on exchange: {} for botId={}", exchangeName, bot.getId());
 
         var balanceList = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
-        BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
+        BigDecimal usdtBalance = balanceList.stream()
+            .filter(b -> "USDT".equals(b.getAsset()))
+            .map(com.tradeengine.exchange.Balance::getFree)
+            .findFirst()
+            .orElse(BigDecimal.ZERO);
 
         RiskManagementService.RiskCheck riskCheck = riskService.validateBuy(bot, usdtBalance, params);
         if (!riskCheck.allowed()) {

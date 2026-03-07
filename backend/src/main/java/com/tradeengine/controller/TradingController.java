@@ -1,6 +1,8 @@
 package com.tradeengine.controller;
 
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.Balance;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.model.TradePosition;
 import com.tradeengine.model.UserApiKey;
 import com.tradeengine.repository.ApiKeyRepository;
@@ -8,6 +10,7 @@ import com.tradeengine.repository.OrderRepository;
 import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.service.ApiKeyService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,13 +23,14 @@ import static com.tradeengine.controller.UserController.getUserId;
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
+@Slf4j
 public class TradingController {
 
     private final OrderRepository orderRepo;
     private final PositionRepository positionRepo;
     private final ApiKeyRepository apiKeyRepo;
     private final ApiKeyService apiKeyService;
-    private final BinanceClient binance;
+    private final ExchangeFactory exchangeFactory;
 
     @GetMapping("/orders")
     public ResponseEntity<?> getOrders(@RequestParam(required = false) String botId) {
@@ -100,7 +104,7 @@ public class TradingController {
     }
 
     @GetMapping("/balances")
-    public ResponseEntity<?> getBalances() {
+    public ResponseEntity<?> getBalances(@RequestParam(defaultValue = "TESTNET") String mode) {
         UUID userId = getUserId();
         var keys = apiKeyRepo.findByUserId(userId);
         if (keys.isEmpty()) {
@@ -110,18 +114,25 @@ public class TradingController {
         try {
             String decryptedKey = apiKeyService.decryptApiKey(key);
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
-            Map<String, BigDecimal> balances = binance.getBalances(decryptedKey, decryptedSecret);
-            var result = balances.entrySet().stream().map(e -> {
+
+            ExchangeClient client = exchangeFactory.getClient(key.getExchange());
+            String baseUrl = client.resolveBaseUrl(mode);
+            List<Balance> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
+
+            log.debug("Fetched {} balances from {} for user {}", balances.size(), key.getExchange(), userId);
+
+            var result = balances.stream().map(b -> {
                 Map<String, Object> map = new HashMap<>();
-                map.put("asset", e.getKey());
-                map.put("free", e.getValue());
-                map.put("locked", BigDecimal.ZERO);
-                map.put("total", e.getValue());
-                map.put("usdValue", e.getValue());
+                map.put("asset", b.getAsset());
+                map.put("free", b.getFree());
+                map.put("locked", b.getLocked());
+                map.put("total", b.getTotal());
+                map.put("usdValue", b.getTotal());
                 return map;
             }).toList();
             return ResponseEntity.ok(result);
         } catch (Exception e) {
+            log.error("Failed to fetch balances via {}: {}", key.getExchange(), e.getMessage());
             return ResponseEntity.ok(List.of());
         }
     }
