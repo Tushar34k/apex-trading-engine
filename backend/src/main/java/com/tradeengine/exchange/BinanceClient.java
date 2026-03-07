@@ -29,6 +29,12 @@ public class BinanceClient implements ExchangeClient {
     @Value("${exchange.binance.base-url}")
     private String defaultBaseUrl;
 
+    @Value("${exchange.binance.live-url:" + LIVE_URL + "}")
+    private String liveBaseUrl;
+
+    @Value("${exchange.binance.testnet-url:" + TESTNET_URL + "}")
+    private String testnetBaseUrl;
+
     @Value("${exchange.binance.recv-window:5000}")
     private long recvWindow;
 
