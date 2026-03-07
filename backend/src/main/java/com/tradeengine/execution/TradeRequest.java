@@ -31,6 +31,11 @@ public class TradeRequest {
     private final String notificationType; // BOT_SELL, BOT_SL, BOT_TP, BOT_TRAILING_SL
     private final Instant timestamp;
 
+    // Risk management — all optional
+    private final BigDecimal stopLossPrice;
+    private final BigDecimal takeProfitPrice;
+    private final BigDecimal trailingStopPercent;
+
     // Callback for the submitter to await result
     @Builder.Default
     private final CompletableFuture<TradeResult> resultFuture = new CompletableFuture<>();
@@ -62,6 +67,28 @@ public class TradeRequest {
             throw new IllegalArgumentException("Unsupported order type: " + orderType);
         if ("LIMIT".equalsIgnoreCase(orderType) && (price == null || price.compareTo(BigDecimal.ZERO) <= 0))
             throw new IllegalArgumentException("Price is required and must be > 0 for LIMIT orders");
+
+        // Trailing stop validation
+        if (trailingStopPercent != null) {
+            if (trailingStopPercent.compareTo(new BigDecimal("0.1")) < 0 ||
+                trailingStopPercent.compareTo(new BigDecimal("20")) > 0) {
+                throw new IllegalArgumentException("Trailing stop percent must be between 0.1 and 20");
+            }
+        }
+
+        // SL/TP directional validation (only when price context is available)
+        if ("BUY".equalsIgnoreCase(side) && price != null) {
+            if (stopLossPrice != null && stopLossPrice.compareTo(price) >= 0)
+                throw new IllegalArgumentException("Stop loss must be below entry price for BUY orders");
+            if (takeProfitPrice != null && takeProfitPrice.compareTo(price) <= 0)
+                throw new IllegalArgumentException("Take profit must be above entry price for BUY orders");
+        }
+        if ("SELL".equalsIgnoreCase(side) && price != null) {
+            if (stopLossPrice != null && stopLossPrice.compareTo(price) <= 0)
+                throw new IllegalArgumentException("Stop loss must be above entry price for SELL orders");
+            if (takeProfitPrice != null && takeProfitPrice.compareTo(price) >= 0)
+                throw new IllegalArgumentException("Take profit must be below entry price for SELL orders");
+        }
     }
 
     @Data
