@@ -9,6 +9,7 @@ import {
   Zap,
   BarChart3,
   FlaskConical,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/analytics", icon: BarChart3, label: "Analytics" },
   { to: "/backtesting", icon: FlaskConical, label: "Backtesting" },
+  { to: "/risk", icon: ShieldCheck, label: "Risk Control" },
   { to: "/api-keys", icon: Key, label: "API Keys" },
 ];
 

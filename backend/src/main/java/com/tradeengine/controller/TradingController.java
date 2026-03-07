@@ -125,23 +125,4 @@ public class TradingController {
             return ResponseEntity.ok(List.of());
         }
     }
-
-    @GetMapping("/market/candles")
-    public ResponseEntity<?> getCandles(
-            @RequestParam String symbol,
-            @RequestParam String timeframe,
-            @RequestParam(defaultValue = "100") int limit) {
-        var candles = binance.getCandles(symbol, timeframe, limit);
-        var result = candles.stream().map(c -> {
-            Map<String, Object> map = new HashMap<>();
-            map.put("time", (long) c[0]);
-            map.put("open", c[1]);
-            map.put("high", c[2]);
-            map.put("low", c[3]);
-            map.put("close", c[4]);
-            map.put("volume", c[5]);
-            return map;
-        }).toList();
-        return ResponseEntity.ok(result);
-    }
 }
