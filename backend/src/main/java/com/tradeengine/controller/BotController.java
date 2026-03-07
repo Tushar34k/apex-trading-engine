@@ -10,6 +10,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,6 +23,7 @@ import static com.tradeengine.controller.UserController.getUserId;
 @RestController
 @RequestMapping("/api/bots")
 @RequiredArgsConstructor
+@Slf4j
 public class BotController {
 
     private final BotService botService;
@@ -79,8 +81,13 @@ public class BotController {
 
     @PostMapping("/{id}/start")
     public ResponseEntity<?> start(@PathVariable String id) {
-        botService.startBot(UUID.fromString(id), getUserId());
-        return ResponseEntity.ok(Map.of("status", "RUNNING"));
+        try {
+            botService.startBot(UUID.fromString(id), getUserId());
+            return ResponseEntity.ok(Map.of("status", "RUNNING"));
+        } catch (RuntimeException e) {
+            log.warn("Failed to start bot {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @PostMapping("/{id}/stop")
