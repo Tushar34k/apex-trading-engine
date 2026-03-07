@@ -286,11 +286,16 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
+        final Map<String, Object> riskParams = new HashMap<>(params);
+        final String exName = exchangeName;
+        final String exMode = bot.getExchangeMode();
+        final String exBaseUrl = exchangeBaseUrl;
+
         request.getResultFuture()
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
-                    handleBuyFilled(bot, result);
+                    handleBuyFilled(bot, result, apiKey, secret, exName, exMode, exBaseUrl, riskParams);
                 } else {
                     log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
                     circuitBreaker.recordFailure();
