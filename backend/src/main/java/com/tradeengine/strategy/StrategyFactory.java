@@ -1,6 +1,7 @@
 package com.tradeengine.strategy;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -15,6 +16,9 @@ public class StrategyFactory {
         STRATEGIES.put("EMA_CROSS", new EmaCrossover());
         STRATEGIES.put("SCALPING_EMA", new ScalpingEma());
         STRATEGIES.put("SUPPORT_RESISTANCE", new SupportResistance());
+        STRATEGIES.put("RSI", new RsiStrategy());
+        STRATEGIES.put("MACD", new MacdStrategy());
+        STRATEGIES.put("BREAKOUT", new BreakoutStrategy());
     }
 
     public static TradingStrategy get(String strategyType) {
@@ -28,5 +32,9 @@ public class StrategyFactory {
 
     public static boolean exists(String strategyType) {
         return STRATEGIES.containsKey(strategyType);
+    }
+
+    public static Set<String> availableStrategies() {
+        return STRATEGIES.keySet();
     }
 }
