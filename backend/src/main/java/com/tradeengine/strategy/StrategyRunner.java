@@ -9,10 +9,7 @@ import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
-import com.tradeengine.service.ApiKeyService;
-import com.tradeengine.service.NotificationService;
-import com.tradeengine.service.RiskManagementService;
-import com.tradeengine.service.TrailingStopService;
+import com.tradeengine.service.*;
 import com.tradeengine.ws.BinanceStreamClient;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +23,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -47,23 +45,49 @@ public class StrategyRunner {
     private final NotificationService notificationService;
     private final BinanceStreamClient streamClient;
     private final TradeExecutionQueue executionQueue;
+    private final KillSwitchService killSwitch;
+    private final SignalDebounceService debounceService;
+    private final CircuitBreakerService circuitBreaker;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
     private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(60);
 
+    // Bot processing locks — prevents concurrent execution per bot
+    private final ConcurrentHashMap<UUID, Boolean> botLocks = new ConcurrentHashMap<>();
+
     @Scheduled(fixedDelay = 30000)
     public void runStrategies() {
+        // Kill switch check
+        if (killSwitch.isActive()) {
+            log.warn("[STRATEGY] Kill switch active — skipping all bots. Reason: {}", killSwitch.getActivationReason());
+            return;
+        }
+
+        // Circuit breaker check
+        if (!circuitBreaker.isAllowed()) {
+            log.warn("[STRATEGY] Circuit breaker open — trading paused");
+            return;
+        }
+
         List<TradingBot> runningBots = botRepo.findByStatus("RUNNING");
 
         for (TradingBot bot : runningBots) {
+            // Bot-level processing lock
+            if (botLocks.putIfAbsent(bot.getId(), true) != null) {
+                log.debug("Bot {} locked by another cycle, skip", bot.getId());
+                continue;
+            }
+
             try {
                 processBot(bot);
             } catch (Exception e) {
                 log.error("Bot {} [{}] error: {}", bot.getId(), bot.getName(), e.getMessage(), e);
                 bot.setProcessing(false);
                 botRepo.save(bot);
+            } finally {
+                botLocks.remove(bot.getId());
             }
         }
     }
@@ -167,6 +191,14 @@ public class StrategyRunner {
             log.info("Bot {} [{}] strategy={} signal={} reason={}",
                 bot.getId(), bot.getName(), bot.getStrategyType(), signal.signal(), signal.reason());
 
+            // --- Signal debounce ---
+            if (signal.signal() != TradingStrategy.Signal.HOLD) {
+                if (!debounceService.shouldProcess(bot.getId(), signal.signal().name())) {
+                    log.debug("Bot {} signal {} debounced", bot.getId(), signal.signal());
+                    return;
+                }
+            }
+
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
                 submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
@@ -180,12 +212,15 @@ public class StrategyRunner {
         }
     }
 
-    /**
-     * Submit BUY trade to the execution queue instead of executing directly.
-     */
     private void submitBuy(TradingBot bot, String apiKey, String secret,
                            TradingStrategy.SignalResult signal, String exchangeBaseUrl,
                            SymbolInfo symbolInfo, Map<String, Object> params) {
+        // Re-check kill switch before submitting
+        if (killSwitch.isActive()) {
+            log.warn("Bot {} BUY blocked — kill switch active", bot.getId());
+            return;
+        }
+
         var balances = binance.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
@@ -235,24 +270,37 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
-        // Handle result asynchronously
-        request.getResultFuture().thenAccept(result -> {
-            if (result.isSuccess()) {
-                handleBuyFilled(bot, result);
-            } else {
-                log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
-            }
-        });
+        // Execution timeout: 10 seconds
+        request.getResultFuture()
+            .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .thenAccept(result -> {
+                if (result.isSuccess()) {
+                    handleBuyFilled(bot, result);
+                } else {
+                    log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
+                    circuitBreaker.recordFailure();
+                    killSwitch.recordExchangeError();
+                }
+            })
+            .exceptionally(ex -> {
+                log.error("Bot {} BUY execution timed out: {}", bot.getId(), ex.getMessage());
+                circuitBreaker.recordFailure();
+                killSwitch.recordExchangeError();
+                return null;
+            });
     }
 
-    /**
-     * Submit SELL trade to the execution queue.
-     */
     private void submitSell(TradingBot bot, String apiKey, String secret,
                             BigDecimal currentPrice, String reason,
                             String exchangeBaseUrl, SymbolInfo symbolInfo,
                             String notificationType) {
         if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
+
+        // Re-check kill switch (allow SL/TP sells even with kill switch for safety)
+        if (killSwitch.isActive() && "BOT_SELL".equals(notificationType)) {
+            log.warn("Bot {} SELL blocked — kill switch active", bot.getId());
+            return;
+        }
 
         BigDecimal quantity = bot.getQuantity();
         if (symbolInfo != null) {
@@ -282,18 +330,25 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
-        request.getResultFuture().thenAccept(result -> {
-            if (result.isSuccess()) {
-                handleSellFilled(bot, result, notificationType);
-            } else {
-                log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
-            }
-        });
+        request.getResultFuture()
+            .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .thenAccept(result -> {
+                if (result.isSuccess()) {
+                    handleSellFilled(bot, result, notificationType);
+                } else {
+                    log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
+                    circuitBreaker.recordFailure();
+                    killSwitch.recordExchangeError();
+                }
+            })
+            .exceptionally(ex -> {
+                log.error("Bot {} SELL execution timed out: {}", bot.getId(), ex.getMessage());
+                circuitBreaker.recordFailure();
+                killSwitch.recordExchangeError();
+                return null;
+            });
     }
 
-    /**
-     * Post-fill handler for BUY orders — persists order, position, and updates bot state.
-     */
     private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
@@ -334,9 +389,6 @@ public class StrategyRunner {
             bot.getId(), bot.getName(), result.getAvgPrice(), result.getExecutedQty());
     }
 
-    /**
-     * Post-fill handler for SELL orders — closes position, calculates PnL.
-     */
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
@@ -407,7 +459,7 @@ public class StrategyRunner {
         try {
             return objectMapper.readValue(bot.getStrategyParams(), new TypeReference<>() {});
         } catch (Exception e) {
-            log.warn("Bot {}: bad strategyParams JSON: {}", bot.getId(), e.getMessage());
+            log.warn("Bot {}: invalid strategyParams JSON", bot.getId());
             return new HashMap<>();
         }
     }

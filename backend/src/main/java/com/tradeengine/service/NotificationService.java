@@ -51,6 +51,10 @@ public class NotificationService {
         send(userId, "RISK_BLOCKED", botName, symbol, reason, Map.of());
     }
 
+    public void notifyKillSwitch(String userId, String reason) {
+        send(userId, "KILL_SWITCH", "System", "ALL", "Kill switch activated: " + reason, Map.of());
+    }
+
     private void send(String userId, String type, String botName, String symbol,
                       String message, Map<String, Object> data) {
         Map<String, Object> event = new LinkedHashMap<>();
