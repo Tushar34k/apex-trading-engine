@@ -448,15 +448,15 @@ public class StrategyRunner {
             bot.getId(), bot.getName(), result.getAvgPrice(), pnl);
     }
 
-    private String resolveExchangeUrl(String exchangeMode) {
+    private String resolveExchangeUrl(String exchangeMode, ExchangeClient exchangeClient) {
         if ("LIVE".equalsIgnoreCase(exchangeMode)) {
             if (!liveTradingEnabled) {
-                log.warn("Live trading disabled. Forcing TESTNET.");
-                return "https://testnet.binance.vision";
+                log.warn("Live trading disabled. Forcing TESTNET for {}", exchangeClient.getExchangeName());
+                return exchangeClient.resolveBaseUrl("TESTNET");
             }
-            return "https://api.binance.com";
+            return exchangeClient.resolveBaseUrl("LIVE");
         }
-        return "https://testnet.binance.vision";
+        return exchangeClient.resolveBaseUrl("TESTNET");
     }
 
     private Map<String, Object> parseStrategyParams(TradingBot bot) {
