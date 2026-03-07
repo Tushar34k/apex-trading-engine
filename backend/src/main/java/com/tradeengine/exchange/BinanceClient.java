@@ -23,6 +23,9 @@ import java.util.*;
 @Slf4j
 public class BinanceClient implements ExchangeClient {
 
+    private static final String LIVE_URL = "https://api.binance.com";
+    private static final String TESTNET_URL = "https://testnet.binance.vision";
+
     @Value("${exchange.binance.base-url}")
     private String defaultBaseUrl;
 
@@ -57,7 +60,7 @@ public class BinanceClient implements ExchangeClient {
     }
 
     @Override
-    public Map<String, BigDecimal> getBalances(String apiKey, String secret, String baseUrl) {
+    public List<Balance> getBalances(String apiKey, String secret, String baseUrl) {
         return getBalancesInternal(apiKey, secret, baseUrl);
     }
 
@@ -69,6 +72,14 @@ public class BinanceClient implements ExchangeClient {
     @Override
     public String getExchangeName() {
         return "BINANCE";
+    }
+
+    @Override
+    public String resolveBaseUrl(String mode) {
+        if ("LIVE".equalsIgnoreCase(mode)) {
+            return LIVE_URL;
+        }
+        return TESTNET_URL;
     }
 
     // --- Public endpoints ---
@@ -118,17 +129,21 @@ public class BinanceClient implements ExchangeClient {
     private OrderResult placeMarketOrderInternal(String apiKey, String secret, String symbol,
                                                   String side, BigDecimal quantity, String baseUrl) {
         try {
+            long timestamp = System.currentTimeMillis();
             String params = "symbol=" + symbol
                 + "&side=" + side
                 + "&type=MARKET"
                 + "&quantity=" + quantity.toPlainString()
                 + "&recvWindow=" + recvWindow
-                + "&timestamp=" + System.currentTimeMillis();
+                + "&timestamp=" + timestamp;
 
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
             String url = resolveBase(baseUrl) + "/api/v3/order?" + params;
+
+            log.info("[BINANCE] Executing trade: symbol={} side={} qty={} timestamp={}", symbol, side, quantity, timestamp);
+
             String body = post(url, apiKey);
             JsonNode node = mapper.readTree(body);
 
@@ -153,17 +168,18 @@ public class BinanceClient implements ExchangeClient {
                 }
             }
 
-            log.info("Order placed: {} {} {} @ avg {}", side, quantity, symbol, result.getAvgPrice());
+            log.info("[BINANCE] Order placed: {} {} {} @ avg {}", side, quantity, symbol, result.getAvgPrice());
             return result;
         } catch (Exception e) {
-            log.error("Failed to place order: {}", e.getMessage());
+            log.error("[BINANCE] Failed to place order: {}", e.getMessage());
             throw new RuntimeException("Binance order failed: " + e.getMessage(), e);
         }
     }
 
-    private Map<String, BigDecimal> getBalancesInternal(String apiKey, String secret, String baseUrl) {
+    private List<Balance> getBalancesInternal(String apiKey, String secret, String baseUrl) {
         try {
-            String params = "recvWindow=" + recvWindow + "&timestamp=" + System.currentTimeMillis();
+            long timestamp = System.currentTimeMillis();
+            String params = "recvWindow=" + recvWindow + "&timestamp=" + timestamp;
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
@@ -171,16 +187,21 @@ public class BinanceClient implements ExchangeClient {
             String body = get(url, apiKey);
             JsonNode node = mapper.readTree(body);
 
-            Map<String, BigDecimal> balances = new HashMap<>();
+            List<Balance> balances = new ArrayList<>();
             for (JsonNode b : node.get("balances")) {
                 BigDecimal free = new BigDecimal(b.get("free").asText());
-                if (free.compareTo(BigDecimal.ZERO) > 0) {
-                    balances.put(b.get("asset").asText(), free);
+                BigDecimal locked = new BigDecimal(b.get("locked").asText());
+                if (free.compareTo(BigDecimal.ZERO) > 0 || locked.compareTo(BigDecimal.ZERO) > 0) {
+                    balances.add(Balance.builder()
+                        .asset(b.get("asset").asText())
+                        .free(free)
+                        .locked(locked)
+                        .build());
                 }
             }
             return balances;
         } catch (Exception e) {
-            log.error("Failed to get balances: {}", e.getMessage());
+            log.error("[BINANCE] Failed to get balances: {}", e.getMessage());
             throw new RuntimeException("Binance balance failed", e);
         }
     }
@@ -196,7 +217,7 @@ public class BinanceClient implements ExchangeClient {
             String body = get(url, apiKey);
             return List.of(mapper.readTree(body));
         } catch (Exception e) {
-            log.error("Failed to get open orders: {}", e.getMessage());
+            log.error("[BINANCE] Failed to get open orders: {}", e.getMessage());
             return List.of();
         }
     }

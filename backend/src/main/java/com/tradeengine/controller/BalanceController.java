@@ -1,5 +1,6 @@
 package com.tradeengine.controller;
 
+import com.tradeengine.exchange.Balance;
 import com.tradeengine.exchange.ExchangeClient;
 import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.model.UserApiKey;
@@ -43,17 +44,26 @@ public class BalanceController {
         try {
             String decryptedKey = apiKeyService.decryptApiKey(key);
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
-            String baseUrl = resolveUrl(mode);
 
             ExchangeClient client = exchangeFactory.getClient(key.getExchange());
-            Map<String, BigDecimal> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
-            BigDecimal available = balances.getOrDefault("USDT", BigDecimal.ZERO);
+            String baseUrl = resolveUrl(client, mode);
+            List<Balance> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
+
+            BigDecimal available = BigDecimal.ZERO;
+            BigDecimal locked = BigDecimal.ZERO;
+            for (Balance b : balances) {
+                if ("USDT".equals(b.getAsset())) {
+                    available = b.getFree();
+                    locked = b.getLocked() != null ? b.getLocked() : BigDecimal.ZERO;
+                    break;
+                }
+            }
 
             return ResponseEntity.ok(Map.of(
                 "asset", "USDT",
                 "available", available,
-                "locked", BigDecimal.ZERO,
-                "total", available
+                "locked", locked,
+                "total", available.add(locked)
             ));
         } catch (Exception e) {
             log.error("Failed to fetch balance via {}: {}", key.getExchange(), e.getMessage());
@@ -73,15 +83,16 @@ public class BalanceController {
         try {
             String decryptedKey = apiKeyService.decryptApiKey(key);
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
-            String baseUrl = resolveUrl(mode);
 
             ExchangeClient client = exchangeFactory.getClient(key.getExchange());
-            Map<String, BigDecimal> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
-            var result = balances.entrySet().stream().map(e -> Map.of(
-                "asset", e.getKey(),
-                "available", e.getValue(),
-                "locked", BigDecimal.ZERO,
-                "total", e.getValue()
+            String baseUrl = resolveUrl(client, mode);
+            List<Balance> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
+
+            var result = balances.stream().map(b -> Map.of(
+                "asset", (Object) b.getAsset(),
+                "available", b.getFree(),
+                "locked", b.getLocked() != null ? b.getLocked() : BigDecimal.ZERO,
+                "total", b.getTotal()
             )).toList();
             return ResponseEntity.ok(result);
         } catch (Exception e) {
@@ -90,10 +101,11 @@ public class BalanceController {
         }
     }
 
-    private String resolveUrl(String mode) {
-        if ("LIVE".equalsIgnoreCase(mode) && liveTradingEnabled) {
-            return "https://api.binance.com";
+    private String resolveUrl(ExchangeClient client, String mode) {
+        if ("LIVE".equalsIgnoreCase(mode) && !liveTradingEnabled) {
+            log.warn("Live trading disabled. Forcing TESTNET for {}", client.getExchangeName());
+            return client.resolveBaseUrl("TESTNET");
         }
-        return "https://testnet.binance.vision";
+        return client.resolveBaseUrl(mode);
     }
 }

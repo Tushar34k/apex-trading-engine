@@ -1,27 +1,39 @@
 package com.tradeengine.controller;
 
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
+import com.tradeengine.model.UserApiKey;
+import com.tradeengine.repository.ApiKeyRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+
+import static com.tradeengine.controller.UserController.getUserId;
 
 @RestController
 @RequestMapping("/api/market")
 @RequiredArgsConstructor
+@Slf4j
 public class MarketController {
 
-    private final BinanceClient binance;
+    private final ExchangeFactory exchangeFactory;
+    private final ApiKeyRepository apiKeyRepo;
 
     @GetMapping("/candles")
     public ResponseEntity<?> getCandles(
         @RequestParam String symbol,
         @RequestParam(defaultValue = "1h") String timeframe,
-        @RequestParam(defaultValue = "200") int limit
+        @RequestParam(defaultValue = "200") int limit,
+        @RequestParam(defaultValue = "BINANCE") String exchange
     ) {
-        List<double[]> candles = binance.getCandles(symbol, mapTimeframe(timeframe), limit);
+        ExchangeClient client = exchangeFactory.getClient(exchange);
+        String baseUrl = client.resolveBaseUrl("TESTNET");
+        List<double[]> candles = client.getCandles(symbol, mapTimeframe(timeframe), limit, baseUrl);
         var result = candles.stream().map(c -> Map.of(
             "time", (long) c[0],
             "open", c[1],
@@ -37,13 +49,15 @@ public class MarketController {
     public ResponseEntity<?> getSupportResistance(
         @RequestParam String symbol,
         @RequestParam(defaultValue = "1h") String timeframe,
-        @RequestParam(defaultValue = "200") int limit
+        @RequestParam(defaultValue = "200") int limit,
+        @RequestParam(defaultValue = "BINANCE") String exchange
     ) {
-        List<double[]> candles = binance.getCandles(symbol, mapTimeframe(timeframe), limit);
+        ExchangeClient client = exchangeFactory.getClient(exchange);
+        String baseUrl = client.resolveBaseUrl("TESTNET");
+        List<double[]> candles = client.getCandles(symbol, mapTimeframe(timeframe), limit, baseUrl);
         List<Double> highs = candles.stream().map(c -> c[2]).toList();
         List<Double> lows = candles.stream().map(c -> c[3]).toList();
 
-        // Detect swing highs/lows (local extremes over 5-candle window)
         List<Map<String, Object>> levels = new java.util.ArrayList<>();
         int window = 5;
         for (int i = window; i < candles.size() - window; i++) {
@@ -62,7 +76,6 @@ public class MarketController {
             }
         }
 
-        // Cluster nearby levels (within 0.5% of each other)
         List<Map<String, Object>> clustered = new java.util.ArrayList<>();
         List<Boolean> used = new java.util.ArrayList<>(java.util.Collections.nCopies(levels.size(), false));
         for (int i = 0; i < levels.size(); i++) {
@@ -86,7 +99,6 @@ public class MarketController {
             clustered.add(level);
         }
 
-        // Sort by strength desc, take top 10
         clustered.sort((a, b) -> Integer.compare((int) b.get("strength"), (int) a.get("strength")));
         var result = clustered.stream().limit(10).toList();
         return ResponseEntity.ok(result);

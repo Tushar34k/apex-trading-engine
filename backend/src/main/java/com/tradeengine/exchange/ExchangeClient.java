@@ -2,11 +2,10 @@ package com.tradeengine.exchange;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Generic exchange client interface.
- * All exchange implementations (Binance, Delta, Bybit) must implement this.
+ * All exchange implementations must implement this.
  */
 public interface ExchangeClient {
 
@@ -22,9 +21,9 @@ public interface ExchangeClient {
     BigDecimal getPrice(String symbol, String baseUrl);
 
     /**
-     * Get account balances.
+     * Get account balances as structured Balance objects.
      */
-    Map<String, BigDecimal> getBalances(String apiKey, String secret, String baseUrl);
+    List<Balance> getBalances(String apiKey, String secret, String baseUrl);
 
     /**
      * Get historical candle/kline data.
@@ -35,4 +34,11 @@ public interface ExchangeClient {
      * Returns the exchange identifier (e.g. "BINANCE", "DELTA", "BYBIT").
      */
     String getExchangeName();
+
+    /**
+     * Resolve the base URL for the given trading mode.
+     * @param mode "LIVE" or "TESTNET"
+     * @return the appropriate API base URL for this exchange
+     */
+    String resolveBaseUrl(String mode);
 }

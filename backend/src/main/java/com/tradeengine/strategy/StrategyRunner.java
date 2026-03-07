@@ -116,7 +116,7 @@ public class StrategyRunner {
 
             String decryptedKey = apiKeyService.decryptApiKey(apiKey);
             String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
-            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode());
+            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode(), exchangeClient);
 
             SymbolInfo symbolInfo = symbolInfoCache.getOrFetch(bot.getSymbol(), exchangeBaseUrl);
             Map<String, Object> params = parseStrategyParams(bot);
@@ -228,8 +228,12 @@ public class StrategyRunner {
 
         log.info("Executing trade on exchange: {} for botId={}", exchangeName, bot.getId());
 
-        var balances = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
-        BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
+        var balanceList = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
+        BigDecimal usdtBalance = balanceList.stream()
+            .filter(b -> "USDT".equals(b.getAsset()))
+            .map(com.tradeengine.exchange.Balance::getFree)
+            .findFirst()
+            .orElse(BigDecimal.ZERO);
 
         RiskManagementService.RiskCheck riskCheck = riskService.validateBuy(bot, usdtBalance, params);
         if (!riskCheck.allowed()) {
@@ -448,15 +452,15 @@ public class StrategyRunner {
             bot.getId(), bot.getName(), result.getAvgPrice(), pnl);
     }
 
-    private String resolveExchangeUrl(String exchangeMode) {
+    private String resolveExchangeUrl(String exchangeMode, ExchangeClient exchangeClient) {
         if ("LIVE".equalsIgnoreCase(exchangeMode)) {
             if (!liveTradingEnabled) {
-                log.warn("Live trading disabled. Forcing TESTNET.");
-                return "https://testnet.binance.vision";
+                log.warn("Live trading disabled. Forcing TESTNET for {}", exchangeClient.getExchangeName());
+                return exchangeClient.resolveBaseUrl("TESTNET");
             }
-            return "https://api.binance.com";
+            return exchangeClient.resolveBaseUrl("LIVE");
         }
-        return "https://testnet.binance.vision";
+        return exchangeClient.resolveBaseUrl("TESTNET");
     }
 
     private Map<String, Object> parseStrategyParams(TradingBot bot) {
