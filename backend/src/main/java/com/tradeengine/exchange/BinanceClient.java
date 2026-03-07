@@ -97,9 +97,9 @@ public class BinanceClient implements ExchangeClient {
     @Override
     public String resolveBaseUrl(String mode) {
         if ("LIVE".equalsIgnoreCase(mode)) {
-            return LIVE_URL;
+            return liveBaseUrl;
         }
-        return TESTNET_URL;
+        return testnetBaseUrl;
     }
 
     // --- Public endpoints ---
