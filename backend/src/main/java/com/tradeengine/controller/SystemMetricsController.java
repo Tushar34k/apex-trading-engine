@@ -27,6 +27,17 @@ public class SystemMetricsController {
         Map<String, Object> m = new LinkedHashMap<>();
 
         // Execution queue
+        Map<String, Object> queueMetrics = new LinkedHashMap<>();
+        queueMetrics.put("size", executionQueue.getQueueSize());
+        queueMetrics.put("capacity", executionQueue.getQueueCapacity());
+        queueMetrics.put("usagePercent", Math.round(executionQueue.getQueueUsagePercent() * 100.0) / 100.0);
+        queueMetrics.put("pendingBots", executionQueue.getPendingBotsCount());
+        queueMetrics.put("totalSubmitted", executionQueue.getTotalSubmitted());
+        queueMetrics.put("totalExecuted", executionQueue.getTotalExecuted());
+        queueMetrics.put("totalFailed", executionQueue.getTotalFailed());
+        m.put("queue", queueMetrics);
+
+        // Flat compat fields
         m.put("queueSize", executionQueue.getQueueSize());
         m.put("totalSubmitted", executionQueue.getTotalSubmitted());
         m.put("totalExecuted", executionQueue.getTotalExecuted());
@@ -46,13 +57,17 @@ public class SystemMetricsController {
         ks.put("active", killSwitch.isActive());
         ks.put("reason", killSwitch.getActivationReason());
         ks.put("activatedAt", killSwitch.getActivatedAt());
+        ks.put("maxDailyLossPercent", killSwitch.getMaxDailyLossPercent());
+        ks.put("maxTotalExposureUsdt", killSwitch.getMaxTotalExposureUsdt());
         m.put("killSwitch", ks);
 
         // Exchange health
         Map<String, Object> exchange = new LinkedHashMap<>();
         exchange.put("circuitBreakerOpen", circuitBreaker.isOpen());
+        exchange.put("circuitBreakerOpenedAt", circuitBreaker.getOpenedAt());
         exchange.put("recentErrors", circuitBreaker.getRecentFailureCount());
         exchange.put("killSwitchErrors", killSwitch.getRecentErrorCount());
+        exchange.put("maxErrorsPerMinute", killSwitch.getMaxExchangeErrorsPerMinute());
         m.put("exchangeHealth", exchange);
 
         return m;

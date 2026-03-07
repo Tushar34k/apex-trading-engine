@@ -182,15 +182,28 @@ export interface SystemMetrics {
   totalBots: number;
   runningBots: number;
   openPositions: number;
+  queue: {
+    size: number;
+    capacity: number;
+    usagePercent: number;
+    pendingBots: number;
+    totalSubmitted: number;
+    totalExecuted: number;
+    totalFailed: number;
+  };
   killSwitch: {
     active: boolean;
     reason: string | null;
     activatedAt: string | null;
+    maxDailyLossPercent: number;
+    maxTotalExposureUsdt: number;
   };
   exchangeHealth: {
     circuitBreakerOpen: boolean;
+    circuitBreakerOpenedAt: string | null;
     recentErrors: number;
     killSwitchErrors: number;
+    maxErrorsPerMinute: number;
   };
 }
 
