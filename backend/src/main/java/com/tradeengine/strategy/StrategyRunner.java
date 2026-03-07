@@ -370,7 +370,10 @@ public class StrategyRunner {
             });
     }
 
-    private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result) {
+    private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result,
+                                   String apiKey, String apiSecret,
+                                   String exchangeName, String exchangeMode, String exchangeBaseUrl,
+                                   Map<String, Object> params) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
         order.setUserId(bot.getUserId());
@@ -400,6 +403,38 @@ public class StrategyRunner {
         position.setEntryPrice(result.getAvgPrice());
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
+
+        // Register with PositionTracker for real-time risk monitoring
+        BigDecimal slPrice = params.containsKey("stopLossPercent")
+            ? result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
+                BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)))
+            : null;
+        BigDecimal tpPrice = params.containsKey("takeProfitPercent")
+            ? result.getAvgPrice().multiply(BigDecimal.ONE.add(
+                BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)))
+            : null;
+        BigDecimal trailingPct = params.containsKey("trailingStopPercent")
+            ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
+            : null;
+
+        positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
+            .botId(bot.getId())
+            .userId(bot.getUserId())
+            .symbol(bot.getSymbol())
+            .exchange(exchangeName)
+            .exchangeMode(exchangeMode)
+            .entryPrice(result.getAvgPrice())
+            .quantity(result.getExecutedQty())
+            .apiKey(apiKey)
+            .apiSecret(apiSecret)
+            .exchangeBaseUrl(exchangeBaseUrl)
+            .stopLossPrice(slPrice)
+            .takeProfitPrice(tpPrice)
+            .trailingStopPercent(trailingPct)
+            .highestPriceSeen(result.getAvgPrice())
+            .lowestPriceSeen(result.getAvgPrice())
+            .openedAt(Instant.now())
+            .build());
 
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
         publisher.publishPositionOpened(bot.getUserId().toString(), position);
