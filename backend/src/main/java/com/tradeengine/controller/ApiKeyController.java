@@ -1,6 +1,8 @@
 package com.tradeengine.controller;
 
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
+import com.tradeengine.exchange.SupportedExchange;
 import com.tradeengine.model.UserApiKey;
 import com.tradeengine.repository.ApiKeyRepository;
 import com.tradeengine.service.ApiKeyService;
@@ -24,7 +26,7 @@ public class ApiKeyController {
 
     private final ApiKeyService apiKeyService;
     private final ApiKeyRepository apiKeyRepo;
-    private final BinanceClient binanceClient;
+    private final ExchangeFactory exchangeFactory;
 
     @Data
     public static class AddKeyRequest {
@@ -55,9 +57,17 @@ public class ApiKeyController {
 
     @PostMapping
     public ResponseEntity<?> add(@Valid @RequestBody AddKeyRequest req) {
-        var key = apiKeyService.addKey(getUserId(), req.getExchange(), req.getLabel(),
+        // Validate exchange is supported
+        try {
+            SupportedExchange.validate(req.getExchange());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+
+        var key = apiKeyService.addKey(getUserId(), req.getExchange().toUpperCase(), req.getLabel(),
             req.getApiKey(), req.getApiSecret(), req.getPermissions());
-        return ResponseEntity.ok(Map.of("id", key.getId(), "label", key.getLabel()));
+        log.info("API key added: exchange={} label={} userId={}", req.getExchange(), req.getLabel(), getUserId());
+        return ResponseEntity.ok(Map.of("id", key.getId(), "label", key.getLabel(), "exchange", key.getExchange()));
     }
 
     @DeleteMapping("/{id}")
@@ -75,10 +85,21 @@ public class ApiKeyController {
         try {
             String decryptedKey = apiKeyService.decryptApiKey(key);
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
-            var balances = binanceClient.getBalances(decryptedKey, decryptedSecret);
-            return ResponseEntity.ok(Map.of("valid", true, "message", "Connected. Found " + balances.size() + " assets."));
+
+            ExchangeClient client = exchangeFactory.getClient(key.getExchange());
+            var balances = client.getBalances(decryptedKey, decryptedSecret, null);
+            return ResponseEntity.ok(Map.of("valid", true,
+                "message", "Connected to " + key.getExchange() + ". Found " + balances.size() + " assets."));
+        } catch (UnsupportedOperationException e) {
+            return ResponseEntity.ok(Map.of("valid", false,
+                "message", key.getExchange() + " integration is not yet implemented"));
         } catch (Exception e) {
             return ResponseEntity.ok(Map.of("valid", false, "message", "Failed: " + e.getMessage()));
         }
+    }
+
+    @GetMapping("/supported-exchanges")
+    public ResponseEntity<?> supportedExchanges() {
+        return ResponseEntity.ok(List.of("BINANCE", "DELTA", "BYBIT"));
     }
 }

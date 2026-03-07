@@ -21,7 +21,7 @@ import java.util.*;
 
 @Component
 @Slf4j
-public class BinanceClient {
+public class BinanceClient implements ExchangeClient {
 
     @Value("${exchange.binance.base-url}")
     private String defaultBaseUrl;
@@ -35,7 +35,43 @@ public class BinanceClient {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    // --- Public endpoints (use provided or default base URL) ---
+    // --- ExchangeClient interface ---
+
+    @Override
+    public OrderResponse placeMarketOrder(String apiKey, String secret, String symbol,
+                                           String side, BigDecimal quantity, String baseUrl) {
+        OrderResult result = placeMarketOrderInternal(apiKey, secret, symbol, side, quantity, baseUrl);
+        return OrderResponse.builder()
+            .orderId(result.getOrderId())
+            .symbol(result.getSymbol())
+            .side(result.getSide())
+            .status(result.getStatus())
+            .executedQty(result.getExecutedQty())
+            .avgPrice(result.getAvgPrice())
+            .build();
+    }
+
+    @Override
+    public BigDecimal getPrice(String symbol, String baseUrl) {
+        return getTickerPrice(symbol, baseUrl);
+    }
+
+    @Override
+    public Map<String, BigDecimal> getBalances(String apiKey, String secret, String baseUrl) {
+        return getBalancesInternal(apiKey, secret, baseUrl);
+    }
+
+    @Override
+    public List<double[]> getCandles(String symbol, String interval, int limit, String baseUrl) {
+        return getCandlesInternal(symbol, interval, limit, baseUrl);
+    }
+
+    @Override
+    public String getExchangeName() {
+        return "BINANCE";
+    }
+
+    // --- Public endpoints ---
 
     public BigDecimal getTickerPrice(String symbol) {
         return getTickerPrice(symbol, null);
@@ -53,11 +89,7 @@ public class BinanceClient {
         }
     }
 
-    public List<double[]> getCandles(String symbol, String interval, int limit) {
-        return getCandles(symbol, interval, limit, null);
-    }
-
-    public List<double[]> getCandles(String symbol, String interval, int limit, String baseUrl) {
+    public List<double[]> getCandlesInternal(String symbol, String interval, int limit, String baseUrl) {
         try {
             String url = resolveBase(baseUrl) + "/api/v3/klines?symbol=" + symbol
                 + "&interval=" + interval + "&limit=" + limit;
@@ -83,13 +115,8 @@ public class BinanceClient {
 
     // --- Signed endpoints ---
 
-    public OrderResult placeMarketOrder(String apiKey, String secret, String symbol,
-                                         String side, BigDecimal quantity) {
-        return placeMarketOrder(apiKey, secret, symbol, side, quantity, null);
-    }
-
-    public OrderResult placeMarketOrder(String apiKey, String secret, String symbol,
-                                         String side, BigDecimal quantity, String baseUrl) {
+    private OrderResult placeMarketOrderInternal(String apiKey, String secret, String symbol,
+                                                  String side, BigDecimal quantity, String baseUrl) {
         try {
             String params = "symbol=" + symbol
                 + "&side=" + side
@@ -134,11 +161,7 @@ public class BinanceClient {
         }
     }
 
-    public Map<String, BigDecimal> getBalances(String apiKey, String secret) {
-        return getBalances(apiKey, secret, null);
-    }
-
-    public Map<String, BigDecimal> getBalances(String apiKey, String secret, String baseUrl) {
+    private Map<String, BigDecimal> getBalancesInternal(String apiKey, String secret, String baseUrl) {
         try {
             String params = "recvWindow=" + recvWindow + "&timestamp=" + System.currentTimeMillis();
             String signature = sign(params, secret);

@@ -2,7 +2,8 @@ package com.tradeengine.strategy;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.exchange.SymbolInfo;
 import com.tradeengine.exchange.SymbolInfoCache;
 import com.tradeengine.execution.TradeExecutionQueue;
@@ -36,7 +37,7 @@ public class StrategyRunner {
     private final ApiKeyService apiKeyService;
     private final OrderRepository orderRepo;
     private final PositionRepository positionRepo;
-    private final BinanceClient binance;
+    private final ExchangeFactory exchangeFactory;
     private final SymbolInfoCache symbolInfoCache;
     private final TradeEventPublisher publisher;
     private final ObjectMapper objectMapper;
@@ -59,13 +60,10 @@ public class StrategyRunner {
 
     @Scheduled(fixedDelay = 30000)
     public void runStrategies() {
-        // Kill switch check
         if (killSwitch.isActive()) {
             log.warn("[STRATEGY] Kill switch active — skipping all bots. Reason: {}", killSwitch.getActivationReason());
             return;
         }
-
-        // Circuit breaker check
         if (!circuitBreaker.isAllowed()) {
             log.warn("[STRATEGY] Circuit breaker open — trading paused");
             return;
@@ -74,12 +72,10 @@ public class StrategyRunner {
         List<TradingBot> runningBots = botRepo.findByStatus("RUNNING");
 
         for (TradingBot bot : runningBots) {
-            // Bot-level processing lock
             if (botLocks.putIfAbsent(bot.getId(), true) != null) {
                 log.debug("Bot {} locked by another cycle, skip", bot.getId());
                 continue;
             }
-
             try {
                 processBot(bot);
             } catch (Exception e) {
@@ -110,26 +106,30 @@ public class StrategyRunner {
         botRepo.save(bot);
 
         try {
-            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode());
-
+            // Resolve exchange client dynamically from API key
             UserApiKey apiKey = apiKeyRepo.findById(bot.getApiKeyId())
                 .orElseThrow(() -> new RuntimeException("API key not found for bot " + bot.getId()));
+
+            String exchangeName = apiKey.getExchange();
+            ExchangeClient exchangeClient = exchangeFactory.getClient(exchangeName);
+            log.debug("Bot {} using exchange: {}", bot.getId(), exchangeName);
+
             String decryptedKey = apiKeyService.decryptApiKey(apiKey);
             String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
+            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode());
 
             SymbolInfo symbolInfo = symbolInfoCache.getOrFetch(bot.getSymbol(), exchangeBaseUrl);
             Map<String, Object> params = parseStrategyParams(bot);
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                // Use fresh WebSocket price; fallback to REST if stale (>5s)
                 Double freshPrice = streamClient.getFreshPrice(bot.getSymbol());
                 BigDecimal currentPrice;
                 if (freshPrice != null) {
                     currentPrice = BigDecimal.valueOf(freshPrice);
                 } else {
-                    log.debug("Bot {} price stale/missing for {}, falling back to REST", bot.getId(), bot.getSymbol());
-                    currentPrice = binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
+                    log.debug("Bot {} price stale/missing for {}, falling back to REST via {}", bot.getId(), bot.getSymbol(), exchangeName);
+                    currentPrice = exchangeClient.getPrice(bot.getSymbol(), exchangeBaseUrl);
                 }
 
                 // Trailing stop check
@@ -138,7 +138,7 @@ public class StrategyRunner {
                     if (trailingStopService.checkTrailingStop(bot.getId(), currentPrice, bot.getEntryPrice(), tsPct)) {
                         log.warn("Bot {} TRAILING STOP triggered @ {}", bot.getId(), currentPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Trailing stop triggered", exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL");
+                            "Trailing stop triggered", exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL", exchangeName);
                         return;
                     }
                 }
@@ -151,7 +151,7 @@ public class StrategyRunner {
                     if (currentPrice.compareTo(slPrice) <= 0) {
                         log.warn("Bot {} STOP-LOSS triggered: price {} <= SL {}", bot.getId(), currentPrice, slPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Stop-loss triggered at " + slPct + "%", exchangeBaseUrl, symbolInfo, "BOT_SL");
+                            "Stop-loss triggered at " + slPct + "%", exchangeBaseUrl, symbolInfo, "BOT_SL", exchangeName);
                         return;
                     }
                 }
@@ -164,14 +164,14 @@ public class StrategyRunner {
                     if (currentPrice.compareTo(tpPrice) >= 0) {
                         log.info("Bot {} TAKE-PROFIT triggered: price {} >= TP {}", bot.getId(), currentPrice, tpPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Take-profit triggered at " + tpPct + "%", exchangeBaseUrl, symbolInfo, "BOT_TP");
+                            "Take-profit triggered at " + tpPct + "%", exchangeBaseUrl, symbolInfo, "BOT_TP", exchangeName);
                         return;
                     }
                 }
             }
 
-            // --- Fetch candles ---
-            List<double[]> candles = binance.getCandles(bot.getSymbol(), bot.getTimeframe(), 100, exchangeBaseUrl);
+            // --- Fetch candles via exchange client ---
+            List<double[]> candles = exchangeClient.getCandles(bot.getSymbol(), bot.getTimeframe(), 100, exchangeBaseUrl);
             if (candles.size() < 50) {
                 log.warn("Bot {}: only {} candles, need 50+. Skip.", bot.getId(), candles.size());
                 return;
@@ -193,8 +193,8 @@ public class StrategyRunner {
 
             TradingStrategy.SignalResult signal = strategy.evaluate(closingPrices, candles, params, bot.isHasOpenPosition());
 
-            log.info("Bot {} [{}] strategy={} signal={} reason={}",
-                bot.getId(), bot.getName(), bot.getStrategyType(), signal.signal(), signal.reason());
+            log.info("Bot {} [{}] exchange={} strategy={} signal={} reason={}",
+                bot.getId(), bot.getName(), exchangeName, bot.getStrategyType(), signal.signal(), signal.reason());
 
             // --- Signal debounce ---
             if (signal.signal() != TradingStrategy.Signal.HOLD) {
@@ -205,11 +205,11 @@ public class StrategyRunner {
             }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
-                submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params);
+                submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
                     BigDecimal.valueOf(signal.price()), signal.reason(),
-                    exchangeBaseUrl, symbolInfo, "BOT_SELL");
+                    exchangeBaseUrl, symbolInfo, "BOT_SELL", exchangeName);
             }
         } finally {
             bot.setProcessing(false);
@@ -219,14 +219,16 @@ public class StrategyRunner {
 
     private void submitBuy(TradingBot bot, String apiKey, String secret,
                            TradingStrategy.SignalResult signal, String exchangeBaseUrl,
-                           SymbolInfo symbolInfo, Map<String, Object> params) {
-        // Re-check kill switch before submitting
+                           SymbolInfo symbolInfo, Map<String, Object> params,
+                           String exchangeName, ExchangeClient exchangeClient) {
         if (killSwitch.isActive()) {
             log.warn("Bot {} BUY blocked — kill switch active", bot.getId());
             return;
         }
 
-        var balances = binance.getBalances(apiKey, secret, exchangeBaseUrl);
+        log.info("Executing trade on exchange: {} for botId={}", exchangeName, bot.getId());
+
+        var balances = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
         RiskManagementService.RiskCheck riskCheck = riskService.validateBuy(bot, usdtBalance, params);
@@ -256,8 +258,8 @@ public class StrategyRunner {
             }
         }
 
-        log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue",
-            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice);
+        log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue via {}",
+            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, exchangeName);
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
@@ -269,13 +271,13 @@ public class StrategyRunner {
             .apiKey(apiKey)
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)
+            .exchange(exchangeName)
             .notificationType("BOT_BUY")
             .timestamp(Instant.now())
             .build();
 
         executionQueue.submitTrade(request);
 
-        // Execution timeout: 10 seconds
         request.getResultFuture()
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
@@ -298,10 +300,9 @@ public class StrategyRunner {
     private void submitSell(TradingBot bot, String apiKey, String secret,
                             BigDecimal currentPrice, String reason,
                             String exchangeBaseUrl, SymbolInfo symbolInfo,
-                            String notificationType) {
+                            String notificationType, String exchangeName) {
         if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
 
-        // Re-check kill switch (allow SL/TP sells even with kill switch for safety)
         if (killSwitch.isActive() && "BOT_SELL".equals(notificationType)) {
             log.warn("Bot {} SELL blocked — kill switch active", bot.getId());
             return;
@@ -316,8 +317,8 @@ public class StrategyRunner {
             }
         }
 
-        log.info("Bot {} [{}]: Submitting SELL {} {} @ ~{} ({}) to execution queue",
-            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, notificationType);
+        log.info("Bot {} [{}]: Submitting SELL {} {} @ ~{} ({}) to execution queue via {}",
+            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, notificationType, exchangeName);
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
@@ -329,6 +330,7 @@ public class StrategyRunner {
             .apiKey(apiKey)
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)
+            .exchange(exchangeName)
             .notificationType(notificationType)
             .timestamp(Instant.now())
             .build();

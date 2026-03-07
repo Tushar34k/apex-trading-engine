@@ -3,10 +3,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAddApiKey } from "@/hooks/api/useApiKeys";
 import { toast } from "@/hooks/use-toast";
 import { Eye, EyeOff } from "lucide-react";
+
+const SUPPORTED_EXCHANGES = [
+  { value: "BINANCE", label: "Binance" },
+  { value: "DELTA", label: "Delta Exchange" },
+  { value: "BYBIT", label: "Bybit" },
+];
 
 interface AddApiKeyDialogProps {
   open: boolean;
@@ -14,6 +20,7 @@ interface AddApiKeyDialogProps {
 }
 
 export function AddApiKeyDialog({ open, onOpenChange }: AddApiKeyDialogProps) {
+  const [exchange, setExchange] = useState("BINANCE");
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -23,20 +30,20 @@ export function AddApiKeyDialog({ open, onOpenChange }: AddApiKeyDialogProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!label.trim() || !apiKey.trim() || !apiSecret.trim()) {
+    if (!label.trim() || !apiKey.trim() || !apiSecret.trim() || !exchange) {
       toast({ title: "Validation Error", description: "All fields are required", variant: "destructive" });
       return;
     }
     try {
       await addKey.mutateAsync({
-        exchange: "BINANCE",
+        exchange,
         label: label.trim(),
         apiKey: apiKey.trim(),
         apiSecret: apiSecret.trim(),
         permissions: "TRADE_ONLY",
       });
-      toast({ title: "API Key Added", description: "Your Binance API key has been securely stored." });
-      setLabel(""); setApiKey(""); setApiSecret("");
+      toast({ title: "API Key Added", description: `Your ${exchange} API key has been securely stored.` });
+      setExchange("BINANCE"); setLabel(""); setApiKey(""); setApiSecret("");
       onOpenChange(false);
     } catch (err: any) {
       const msg = err?.response?.data?.message || "Failed to add API key";
@@ -48,9 +55,25 @@ export function AddApiKeyDialog({ open, onOpenChange }: AddApiKeyDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Binance API Key</DialogTitle>
+          <DialogTitle>Add Exchange API Key</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label>Exchange</Label>
+            <Select value={exchange} onValueChange={setExchange}>
+              <SelectTrigger><SelectValue placeholder="Select exchange" /></SelectTrigger>
+              <SelectContent>
+                {SUPPORTED_EXCHANGES.map((ex) => (
+                  <SelectItem key={ex.value} value={ex.value}>{ex.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {exchange !== "BINANCE" && (
+              <p className="text-xs text-muted-foreground">
+                {exchange} integration is coming soon. You can save your key now.
+              </p>
+            )}
+          </div>
           <div className="space-y-2">
             <Label htmlFor="label">Label</Label>
             <Input id="label" placeholder="e.g. Main Trading Key" value={label} onChange={(e) => setLabel(e.target.value)} />

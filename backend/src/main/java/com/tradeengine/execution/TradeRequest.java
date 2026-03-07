@@ -23,6 +23,7 @@ public class TradeRequest {
     private final String apiKey;
     private final String apiSecret;
     private final String exchangeBaseUrl;
+    private final String exchange;      // BINANCE / DELTA / BYBIT
     private final String notificationType; // BOT_SELL, BOT_SL, BOT_TP, BOT_TRAILING_SL
     private final Instant timestamp;
 

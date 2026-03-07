@@ -1,6 +1,7 @@
 package com.tradeengine.controller;
 
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.model.UserApiKey;
 import com.tradeengine.repository.ApiKeyRepository;
 import com.tradeengine.service.ApiKeyService;
@@ -23,7 +24,7 @@ public class BalanceController {
 
     private final ApiKeyRepository apiKeyRepo;
     private final ApiKeyService apiKeyService;
-    private final BinanceClient binance;
+    private final ExchangeFactory exchangeFactory;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
@@ -44,7 +45,8 @@ public class BalanceController {
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
             String baseUrl = resolveUrl(mode);
 
-            Map<String, BigDecimal> balances = binance.getBalances(decryptedKey, decryptedSecret, baseUrl);
+            ExchangeClient client = exchangeFactory.getClient(key.getExchange());
+            Map<String, BigDecimal> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
             BigDecimal available = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
             return ResponseEntity.ok(Map.of(
@@ -54,7 +56,7 @@ public class BalanceController {
                 "total", available
             ));
         } catch (Exception e) {
-            log.error("Failed to fetch balance: {}", e.getMessage());
+            log.error("Failed to fetch balance via {}: {}", key.getExchange(), e.getMessage());
             return ResponseEntity.ok(Map.of(
                 "asset", "USDT", "available", 0, "locked", 0, "total", 0
             ));
@@ -73,7 +75,8 @@ public class BalanceController {
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
             String baseUrl = resolveUrl(mode);
 
-            Map<String, BigDecimal> balances = binance.getBalances(decryptedKey, decryptedSecret, baseUrl);
+            ExchangeClient client = exchangeFactory.getClient(key.getExchange());
+            Map<String, BigDecimal> balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
             var result = balances.entrySet().stream().map(e -> Map.of(
                 "asset", e.getKey(),
                 "available", e.getValue(),
@@ -82,7 +85,7 @@ public class BalanceController {
             )).toList();
             return ResponseEntity.ok(result);
         } catch (Exception e) {
-            log.error("Failed to fetch balances: {}", e.getMessage());
+            log.error("Failed to fetch balances via {}: {}", key.getExchange(), e.getMessage());
             return ResponseEntity.ok(List.of());
         }
     }
