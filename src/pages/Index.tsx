@@ -16,6 +16,11 @@ const Dashboard = () => {
   const [createBotOpen, setCreateBotOpen] = useState(false);
   const { data: botsList } = useBots();
   const { data: balance } = useAccountBalance();
+  const { data: execMetrics } = useQuery({
+    queryKey: ['execution-metrics'],
+    queryFn: execution.metrics,
+    refetchInterval: 5000,
+  });
 
   const runningBots = botsList?.filter((b) => b.status === 'RUNNING') ?? [];
   const totalPnl = botsList?.reduce((sum, b) => sum + (b.pnl ?? 0), 0) ?? 0;
