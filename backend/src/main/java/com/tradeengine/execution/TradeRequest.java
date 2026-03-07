@@ -50,6 +50,18 @@ public class TradeRequest {
             throw new IllegalArgumentException("Quantity must be greater than 0");
         if (botId == null)
             throw new IllegalArgumentException("Bot ID is required");
+        if (apiKey == null || apiKey.isBlank())
+            throw new IllegalArgumentException("API key is required");
+        if (apiSecret == null || apiSecret.isBlank())
+            throw new IllegalArgumentException("API secret is required");
+        if (exchangeMode == null || exchangeMode.isBlank())
+            throw new IllegalArgumentException("Exchange mode is required");
+        if (orderType == null || orderType.isBlank())
+            throw new IllegalArgumentException("Order type is required");
+        if (!"MARKET".equalsIgnoreCase(orderType) && !"LIMIT".equalsIgnoreCase(orderType))
+            throw new IllegalArgumentException("Unsupported order type: " + orderType);
+        if ("LIMIT".equalsIgnoreCase(orderType) && (price == null || price.compareTo(BigDecimal.ZERO) <= 0))
+            throw new IllegalArgumentException("Price is required and must be > 0 for LIMIT orders");
     }
 
     @Data

@@ -241,10 +241,20 @@ public class TradeExecutionQueue {
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                OrderResponse orderResult = exchangeClient.placeMarketOrder(
-                    req.getApiKey(), req.getApiSecret(),
-                    req.getSymbol(), req.getSide(),
-                    req.getQuantity(), req.getExchangeBaseUrl());
+                OrderResponse orderResult;
+                if ("LIMIT".equalsIgnoreCase(req.getOrderType())) {
+                    log.info("[TRADE] Placing LIMIT order: exchange={} symbol={} side={} qty={} price={}",
+                        req.getExchange(), req.getSymbol(), req.getSide(), req.getQuantity(), req.getPrice());
+                    orderResult = exchangeClient.placeLimitOrder(
+                        req.getApiKey(), req.getApiSecret(),
+                        req.getSymbol(), req.getSide(),
+                        req.getQuantity(), req.getPrice(), req.getExchangeBaseUrl());
+                } else {
+                    orderResult = exchangeClient.placeMarketOrder(
+                        req.getApiKey(), req.getApiSecret(),
+                        req.getSymbol(), req.getSide(),
+                        req.getQuantity(), req.getExchangeBaseUrl());
+                }
 
                 return TradeRequest.TradeResult.builder()
                     .success(true)

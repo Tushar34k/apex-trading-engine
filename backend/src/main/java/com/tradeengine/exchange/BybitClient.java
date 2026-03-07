@@ -35,6 +35,15 @@ public class BybitClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse placeLimitOrder(String apiKey, String secret, String symbol,
+                                          String side, BigDecimal quantity, BigDecimal price, String baseUrl) {
+        log.error("[BYBIT] placeLimitOrder called but not yet implemented. symbol={} side={} qty={} price={}", symbol, side, quantity, price);
+        // TODO: Implement Bybit limit order placement
+        // POST /v5/order/create { "category": "spot", "symbol": ..., "side": ..., "orderType": "Limit", "qty": ..., "price": ... }
+        throw new UnsupportedOperationException("Bybit limit order trading is not yet implemented");
+    }
+
+    @Override
     public BigDecimal getPrice(String symbol, String baseUrl) {
         log.error("[BYBIT] getPrice called but not yet implemented. symbol={}", symbol);
         // TODO: Implement Bybit price fetching

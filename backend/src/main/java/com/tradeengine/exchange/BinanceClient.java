@@ -55,6 +55,20 @@ public class BinanceClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse placeLimitOrder(String apiKey, String secret, String symbol,
+                                          String side, BigDecimal quantity, BigDecimal price, String baseUrl) {
+        OrderResult result = placeLimitOrderInternal(apiKey, secret, symbol, side, quantity, price, baseUrl);
+        return OrderResponse.builder()
+            .orderId(result.getOrderId())
+            .symbol(result.getSymbol())
+            .side(result.getSide())
+            .status(result.getStatus())
+            .executedQty(result.getExecutedQty())
+            .avgPrice(result.getAvgPrice())
+            .build();
+    }
+
+    @Override
     public BigDecimal getPrice(String symbol, String baseUrl) {
         return getTickerPrice(symbol, baseUrl);
     }
@@ -176,7 +190,46 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
-    private List<Balance> getBalancesInternal(String apiKey, String secret, String baseUrl) {
+    private OrderResult placeLimitOrderInternal(String apiKey, String secret, String symbol,
+                                                 String side, BigDecimal quantity, BigDecimal price, String baseUrl) {
+        try {
+            long timestamp = System.currentTimeMillis();
+            String params = "symbol=" + symbol
+                + "&side=" + side
+                + "&type=LIMIT"
+                + "&timeInForce=GTC"
+                + "&quantity=" + quantity.toPlainString()
+                + "&price=" + price.toPlainString()
+                + "&recvWindow=" + recvWindow
+                + "&timestamp=" + timestamp;
+
+            String signature = sign(params, secret);
+            params += "&signature=" + signature;
+
+            String url = resolveBase(baseUrl) + "/api/v3/order?" + params;
+
+            log.info("[BINANCE] Executing LIMIT order: symbol={} side={} qty={} price={} timestamp={}",
+                symbol, side, quantity, price, timestamp);
+
+            String body = post(url, apiKey);
+            JsonNode node = mapper.readTree(body);
+
+            OrderResult result = new OrderResult();
+            result.setOrderId(node.get("orderId").asText());
+            result.setSymbol(node.get("symbol").asText());
+            result.setSide(node.get("side").asText());
+            result.setStatus(node.get("status").asText());
+            result.setExecutedQty(new BigDecimal(node.get("executedQty").asText()));
+            result.setAvgPrice(price); // Limit orders fill at the specified price
+
+            log.info("[BINANCE] LIMIT order placed: {} {} {} @ {}", side, quantity, symbol, price);
+            return result;
+        } catch (Exception e) {
+            log.error("[BINANCE] Failed to place LIMIT order: {}", e.getMessage());
+            throw new RuntimeException("Binance LIMIT order failed: " + e.getMessage(), e);
+        }
+    }
+
         try {
             long timestamp = System.currentTimeMillis();
             String params = "recvWindow=" + recvWindow + "&timestamp=" + timestamp;
