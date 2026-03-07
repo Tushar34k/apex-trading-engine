@@ -152,6 +152,13 @@ public class StrategyRunner {
 
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
 
+            // --- Inject order book depth data into params for ORDER_BOOK strategy ---
+            double[] depth = streamClient.getDepth(bot.getSymbol());
+            if (depth != null) {
+                params.put("bidVolume", depth[0]);
+                params.put("askVolume", depth[1]);
+            }
+
             // --- Evaluate strategy ---
             TradingStrategy strategy = StrategyFactory.get(bot.getStrategyType());
             params.putIfAbsent("fastEma", bot.getFastEma());

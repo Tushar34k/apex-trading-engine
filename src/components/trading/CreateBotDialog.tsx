@@ -48,6 +48,11 @@ const STRATEGY_CONFIGS: Record<StrategyType, { label: string; description: strin
     description: "Buy when price breaks above recent high, sell on breakdown below support",
     defaultParams: { breakoutLookback: 20, breakoutConfirm: 0.2 },
   },
+  ORDER_BOOK: {
+    label: "Order Book Imbalance",
+    description: "Buy/sell based on bid/ask volume imbalance from live depth stream",
+    defaultParams: { imbalanceThreshold: 1.5 },
+  },
 };
 
 export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {

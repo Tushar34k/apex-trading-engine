@@ -19,6 +19,7 @@ public class StrategyFactory {
         STRATEGIES.put("RSI", new RsiStrategy());
         STRATEGIES.put("MACD", new MacdStrategy());
         STRATEGIES.put("BREAKOUT", new BreakoutStrategy());
+        STRATEGIES.put("ORDER_BOOK", new OrderBookStrategy());
     }
 
     public static TradingStrategy get(String strategyType) {

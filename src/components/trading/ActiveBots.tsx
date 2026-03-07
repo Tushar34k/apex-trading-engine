@@ -8,6 +8,10 @@ const STRATEGY_LABELS: Record<string, string> = {
   EMA_CROSS: "EMA Cross",
   SCALPING_EMA: "Scalp EMA",
   SUPPORT_RESISTANCE: "S/R",
+  RSI: "RSI",
+  MACD: "MACD",
+  BREAKOUT: "Breakout",
+  ORDER_BOOK: "Order Book",
 };
 
 export function ActiveBots() {
