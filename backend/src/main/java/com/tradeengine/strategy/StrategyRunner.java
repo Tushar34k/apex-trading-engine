@@ -116,7 +116,7 @@ public class StrategyRunner {
 
             String decryptedKey = apiKeyService.decryptApiKey(apiKey);
             String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
-            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode());
+            String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode(), exchangeClient);
 
             SymbolInfo symbolInfo = symbolInfoCache.getOrFetch(bot.getSymbol(), exchangeBaseUrl);
             Map<String, Object> params = parseStrategyParams(bot);
