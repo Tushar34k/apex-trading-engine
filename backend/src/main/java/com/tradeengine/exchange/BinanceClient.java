@@ -29,6 +29,12 @@ public class BinanceClient implements ExchangeClient {
     @Value("${exchange.binance.base-url}")
     private String defaultBaseUrl;
 
+    @Value("${exchange.binance.live-url:" + LIVE_URL + "}")
+    private String liveBaseUrl;
+
+    @Value("${exchange.binance.testnet-url:" + TESTNET_URL + "}")
+    private String testnetBaseUrl;
+
     @Value("${exchange.binance.recv-window:5000}")
     private long recvWindow;
 
@@ -91,9 +97,9 @@ public class BinanceClient implements ExchangeClient {
     @Override
     public String resolveBaseUrl(String mode) {
         if ("LIVE".equalsIgnoreCase(mode)) {
-            return LIVE_URL;
+            return liveBaseUrl;
         }
-        return TESTNET_URL;
+        return testnetBaseUrl;
     }
 
     // --- Public endpoints ---
@@ -230,6 +236,7 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
+    private List<Balance> getBalancesInternal(String apiKey, String secret, String baseUrl) {
         try {
             long timestamp = System.currentTimeMillis();
             String params = "recvWindow=" + recvWindow + "&timestamp=" + timestamp;

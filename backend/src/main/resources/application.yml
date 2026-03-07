@@ -22,11 +22,17 @@ encryption:
 exchange:
   binance:
     base-url: ${BINANCE_BASE_URL:https://testnet.binance.vision}
+    live-url: ${BINANCE_LIVE_URL:https://api.binance.com}
+    testnet-url: ${BINANCE_TESTNET_URL:https://testnet.binance.vision}
     recv-window: 5000
   delta:
     base-url: ${DELTA_BASE_URL:https://cdn-ind.testnet.deltaex.org}
+    live-url: ${DELTA_LIVE_URL:https://api.delta.exchange}
+    testnet-url: ${DELTA_TESTNET_URL:https://cdn-ind.testnet.deltaex.org}
   bybit:
     base-url: ${BYBIT_BASE_URL:https://api-testnet.bybit.com}
+    live-url: ${BYBIT_LIVE_URL:https://api.bybit.com}
+    testnet-url: ${BYBIT_TESTNET_URL:https://api-testnet.bybit.com}
 
 server:
   port: 8080
