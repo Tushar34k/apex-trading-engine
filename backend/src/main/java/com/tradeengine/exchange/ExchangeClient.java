@@ -16,6 +16,12 @@ public interface ExchangeClient {
                                     String side, BigDecimal quantity, String baseUrl);
 
     /**
+     * Place a limit order on the exchange.
+     */
+    OrderResponse placeLimitOrder(String apiKey, String secret, String symbol,
+                                   String side, BigDecimal quantity, BigDecimal price, String baseUrl);
+
+    /**
      * Get current ticker price for a symbol.
      */
     BigDecimal getPrice(String symbol, String baseUrl);

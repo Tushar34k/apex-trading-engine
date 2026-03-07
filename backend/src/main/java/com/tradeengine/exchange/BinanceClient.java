@@ -55,6 +55,20 @@ public class BinanceClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse placeLimitOrder(String apiKey, String secret, String symbol,
+                                          String side, BigDecimal quantity, BigDecimal price, String baseUrl) {
+        OrderResult result = placeLimitOrderInternal(apiKey, secret, symbol, side, quantity, price, baseUrl);
+        return OrderResponse.builder()
+            .orderId(result.getOrderId())
+            .symbol(result.getSymbol())
+            .side(result.getSide())
+            .status(result.getStatus())
+            .executedQty(result.getExecutedQty())
+            .avgPrice(result.getAvgPrice())
+            .build();
+    }
+
+    @Override
     public BigDecimal getPrice(String symbol, String baseUrl) {
         return getTickerPrice(symbol, baseUrl);
     }

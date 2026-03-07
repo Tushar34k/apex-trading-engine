@@ -34,6 +34,15 @@ public class DeltaClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse placeLimitOrder(String apiKey, String secret, String symbol,
+                                          String side, BigDecimal quantity, BigDecimal price, String baseUrl) {
+        log.error("[DELTA] placeLimitOrder called but not yet implemented. symbol={} side={} qty={} price={}", symbol, side, quantity, price);
+        // TODO: Implement Delta Exchange limit order placement
+        // POST /v2/orders { "product_id": ..., "size": ..., "side": ..., "order_type": "limit_order", "limit_price": ... }
+        throw new UnsupportedOperationException("Delta Exchange limit order trading is not yet implemented");
+    }
+
+    @Override
     public BigDecimal getPrice(String symbol, String baseUrl) {
         log.error("[DELTA] getPrice called but not yet implemented. symbol={}", symbol);
         // TODO: Implement Delta Exchange price fetching
