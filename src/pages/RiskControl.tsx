@@ -1,4 +1,4 @@
-import { ShieldCheck, AlertTriangle, Activity, TrendingDown } from "lucide-react";
+import { ShieldCheck, AlertTriangle, Activity } from "lucide-react";
 import { useBots } from "@/hooks/api/useBots";
 import { usePositions } from "@/hooks/api/useTrades";
 import { useNotifications } from "@/hooks/useNotifications";
