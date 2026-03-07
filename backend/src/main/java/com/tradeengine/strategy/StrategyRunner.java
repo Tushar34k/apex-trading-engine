@@ -50,8 +50,6 @@ public class StrategyRunner {
     private final SignalDebounceService debounceService;
     private final CircuitBreakerService circuitBreaker;
     private final PositionTracker positionTracker;
-    private final SignalDebounceService debounceService;
-    private final CircuitBreakerService circuitBreaker;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;

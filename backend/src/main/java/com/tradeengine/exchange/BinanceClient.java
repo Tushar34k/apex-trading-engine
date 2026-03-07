@@ -230,6 +230,7 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
+    private List<Balance> getBalancesInternal(String apiKey, String secret, String baseUrl) {
         try {
             long timestamp = System.currentTimeMillis();
             String params = "recvWindow=" + recvWindow + "&timestamp=" + timestamp;
