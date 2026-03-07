@@ -133,6 +133,7 @@ export const bots = {
   start: (id: string) => client.post(`/bots/${id}/start`).then((r) => r.data),
   stop: (id: string) => client.post(`/bots/${id}/stop`).then((r) => r.data),
   status: (id: string) => client.get(`/bots/${id}/status`).then((r) => r.data),
+  delete: (id: string) => client.delete(`/bots/${id}`).then((r) => r.data),
 };
 
 // --- Trading Data ---
