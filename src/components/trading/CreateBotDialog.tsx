@@ -5,11 +5,12 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useCreateBot } from "@/hooks/api/useBots";
 import { useApiKeys } from "@/hooks/api/useApiKeys";
 import { toast } from "@/hooks/use-toast";
 import type { StrategyType, ExchangeMode } from "@/types";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
 
 interface CreateBotDialogProps {
   open: boolean;
@@ -45,6 +46,10 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
   const [strategyParams, setStrategyParams] = useState<Record<string, number>>(
     STRATEGY_CONFIGS.EMA_CROSS.defaultParams
   );
+  const [enableSL, setEnableSL] = useState(false);
+  const [stopLossPercent, setStopLossPercent] = useState(5);
+  const [enableTP, setEnableTP] = useState(false);
+  const [takeProfitPercent, setTakeProfitPercent] = useState(10);
 
   const createBot = useCreateBot();
   const { data: keysList } = useApiKeys();
@@ -71,6 +76,11 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
       const fastEma = strategyParams.fastEma ?? 9;
       const slowEma = strategyParams.slowEma ?? 21;
 
+      // Build final params with optional SL/TP
+      const finalParams = { ...strategyParams };
+      if (enableSL) finalParams.stopLossPercent = stopLossPercent;
+      if (enableTP) finalParams.takeProfitPercent = takeProfitPercent;
+
       await createBot.mutateAsync({
         name: name.trim(),
         symbol: symbol.trim().toUpperCase(),
@@ -81,7 +91,7 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
         tradeSizePercent,
         apiKeyId,
         exchangeMode,
-        strategyParams: JSON.stringify(strategyParams),
+        strategyParams: JSON.stringify(finalParams),
       });
       toast({ title: "Bot Created", description: `Bot "${name}" created with ${STRATEGY_CONFIGS[strategyType].label} strategy.` });
       onOpenChange(false);
@@ -100,11 +110,15 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
     setTradeSizePercent(10);
     setApiKeyId("");
     setStrategyParams({ ...STRATEGY_CONFIGS.EMA_CROSS.defaultParams });
+    setEnableSL(false);
+    setStopLossPercent(5);
+    setEnableTP(false);
+    setTakeProfitPercent(10);
   };
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) resetForm(); }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Trading Bot</DialogTitle>
         </DialogHeader>
@@ -212,6 +226,40 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
               onChange={(e) => setTradeSizePercent(Number(e.target.value))} />
           </div>
 
+          {/* Risk Management: Stop-Loss / Take-Profit */}
+          <div className="space-y-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              Risk Management (optional)
+            </div>
+
+            <div className="flex items-center justify-between">
+              <Label htmlFor="sl-toggle" className="text-sm">Stop-Loss</Label>
+              <Switch id="sl-toggle" checked={enableSL} onCheckedChange={setEnableSL} />
+            </div>
+            {enableSL && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Stop-Loss %</Label>
+                <Input type="number" min={0.5} max={50} step={0.5} value={stopLossPercent}
+                  onChange={(e) => setStopLossPercent(Number(e.target.value))} />
+                <p className="text-[10px] text-muted-foreground">Auto-sell if price drops this % below entry</p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between">
+              <Label htmlFor="tp-toggle" className="text-sm">Take-Profit</Label>
+              <Switch id="tp-toggle" checked={enableTP} onCheckedChange={setEnableTP} />
+            </div>
+            {enableTP && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Take-Profit %</Label>
+                <Input type="number" min={0.5} max={100} step={0.5} value={takeProfitPercent}
+                  onChange={(e) => setTakeProfitPercent(Number(e.target.value))} />
+                <p className="text-[10px] text-muted-foreground">Auto-sell if price rises this % above entry</p>
+              </div>
+            )}
+          </div>
+
           {/* Summary */}
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline">{STRATEGY_CONFIGS[strategyType].label}</Badge>
@@ -219,6 +267,8 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             <Badge variant="outline">{symbol || "—"}</Badge>
             <Badge variant="outline">{timeframe}</Badge>
             <Badge variant="outline">{tradeSizePercent}% size</Badge>
+            {enableSL && <Badge variant="outline" className="text-destructive border-destructive/30">SL {stopLossPercent}%</Badge>}
+            {enableTP && <Badge variant="outline" className="text-profit border-profit/30">TP {takeProfitPercent}%</Badge>}
           </div>
 
           <DialogFooter>
