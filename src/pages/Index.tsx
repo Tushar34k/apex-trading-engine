@@ -1,4 +1,4 @@
-import { Plus, Wallet, Activity, Shield, ShieldAlert, ShieldCheck, AlertTriangle, Zap } from "lucide-react";
+import { Plus, Wallet, Activity, Shield, ShieldAlert, ShieldCheck, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TradingChart } from "@/components/trading/TradingChart";
@@ -46,6 +46,7 @@ const Dashboard = () => {
 
   const killSwitchActive = sysMetrics?.killSwitch?.active ?? false;
   const circuitBreakerOpen = sysMetrics?.exchangeHealth?.circuitBreakerOpen ?? false;
+  const queueUsage = sysMetrics?.queue?.usagePercent ?? 0;
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -74,6 +75,14 @@ const Dashboard = () => {
         <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 flex items-center gap-3">
           <AlertTriangle className="h-4 w-4 text-warning" />
           <p className="text-sm text-warning">Circuit breaker open — trading paused for 60s due to exchange errors</p>
+        </div>
+      )}
+
+      {/* Queue Capacity Warning */}
+      {queueUsage >= 80 && (
+        <div className="rounded-lg border border-warning/50 bg-warning/10 p-3 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-warning" />
+          <p className="text-sm text-warning">Execution queue at {queueUsage.toFixed(0)}% capacity</p>
         </div>
       )}
 
@@ -129,10 +138,10 @@ const Dashboard = () => {
             <Activity className="h-3 w-3" /> Exec Queue
           </div>
           <div className="mt-1 text-lg font-bold font-mono text-foreground">
-            {sysMetrics?.queueSize ?? 0} pending
+            {sysMetrics?.queue?.size ?? 0} / {sysMetrics?.queue?.capacity ?? 1000}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {sysMetrics?.totalExecuted ?? 0} ok · {sysMetrics?.totalFailed ?? 0} fail
+            {sysMetrics?.totalExecuted ?? 0} ok · {sysMetrics?.totalFailed ?? 0} fail · {sysMetrics?.queue?.pendingBots ?? 0} bots pending
           </div>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
@@ -153,7 +162,7 @@ const Dashboard = () => {
             {killSwitchActive ? 'HALTED' : circuitBreakerOpen ? 'PAUSED' : 'HEALTHY'}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
-            {sysMetrics?.exchangeHealth?.recentErrors ?? 0} errors/min
+            {sysMetrics?.exchangeHealth?.recentErrors ?? 0} errors/min · {sysMetrics?.openPositions ?? 0} positions
           </div>
         </div>
       </div>
