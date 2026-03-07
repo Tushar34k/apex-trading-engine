@@ -13,6 +13,9 @@ const STRATEGY_LABELS: Record<string, string> = {
   EMA_CROSS: "EMA Crossover",
   SCALPING_EMA: "Scalping EMA",
   SUPPORT_RESISTANCE: "Support & Resistance",
+  RSI: "RSI Strategy",
+  MACD: "MACD Strategy",
+  BREAKOUT: "Breakout Strategy",
 };
 
 export default function Backtesting() {

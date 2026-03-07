@@ -33,6 +33,21 @@ const STRATEGY_CONFIGS: Record<StrategyType, { label: string; description: strin
     description: "Buy at support bounces, sell at resistance rejections",
     defaultParams: { lookback: 50, tolerance: 0.3 },
   },
+  RSI: {
+    label: "RSI Strategy",
+    description: "Buy when RSI is oversold, sell when overbought",
+    defaultParams: { rsiPeriod: 14, rsiBuyThreshold: 30, rsiSellThreshold: 70 },
+  },
+  MACD: {
+    label: "MACD Strategy",
+    description: "Buy on MACD line crossing above signal line, sell on cross below",
+    defaultParams: { macdFast: 12, macdSlow: 26, macdSignal: 9 },
+  },
+  BREAKOUT: {
+    label: "Breakout Strategy",
+    description: "Buy when price breaks above recent high, sell on breakdown below support",
+    defaultParams: { breakoutLookback: 20, breakoutConfirm: 0.2 },
+  },
 };
 
 export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {

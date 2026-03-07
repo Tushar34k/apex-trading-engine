@@ -11,6 +11,7 @@ import com.tradeengine.service.ApiKeyService;
 import com.tradeengine.service.NotificationService;
 import com.tradeengine.service.RiskManagementService;
 import com.tradeengine.service.TrailingStopService;
+import com.tradeengine.ws.BinanceStreamClient;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,6 +43,7 @@ public class StrategyRunner {
     private final RiskManagementService riskService;
     private final TrailingStopService trailingStopService;
     private final NotificationService notificationService;
+    private final BinanceStreamClient streamClient;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
@@ -94,7 +96,11 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                BigDecimal currentPrice = binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
+                // Read price from WebSocket cache first, fallback to REST
+                Double cachedPrice = streamClient.getLatestPrice(bot.getSymbol());
+                BigDecimal currentPrice = cachedPrice != null
+                    ? BigDecimal.valueOf(cachedPrice)
+                    : binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
 
                 // Trailing stop check
                 if (params.containsKey("trailingStopPercent")) {

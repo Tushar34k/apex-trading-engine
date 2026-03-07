@@ -59,7 +59,7 @@ export interface ApiKeyTestResult {
 
 export type BotStatus = 'RUNNING' | 'STOPPED';
 export type ExchangeMode = 'TESTNET' | 'LIVE';
-export type StrategyType = 'EMA_CROSS' | 'SCALPING_EMA' | 'SUPPORT_RESISTANCE';
+export type StrategyType = 'EMA_CROSS' | 'SCALPING_EMA' | 'SUPPORT_RESISTANCE' | 'RSI' | 'MACD' | 'BREAKOUT';
 
 export interface TradingBot {
   id: string;
