@@ -228,7 +228,7 @@ public class StrategyRunner {
 
         log.info("Executing trade on exchange: {} for botId={}", exchangeName, bot.getId());
 
-        var balances = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
+        var balanceList = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balances.getOrDefault("USDT", BigDecimal.ZERO);
 
         RiskManagementService.RiskCheck riskCheck = riskService.validateBuy(bot, usdtBalance, params);
