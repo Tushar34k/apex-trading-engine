@@ -4,6 +4,7 @@ import type {
   ApiKey, AddApiKeyRequest, ApiKeyTestResult,
   TradingBot, CreateBotRequest,
   Order, Trade, Position, Balance, CandleData,
+  AccountBalance, BotStats, BacktestRequest, BacktestResult,
 } from '@/types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
@@ -36,7 +37,6 @@ const client: AxiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor: inject JWT
 client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (accessToken && config.headers) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -44,7 +44,6 @@ client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// Response interceptor: auto-refresh on 401
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = [];
 
@@ -100,10 +99,9 @@ client.interceptors.response.use(
 );
 
 // ============================================
-// API Methods — V1
+// API Methods
 // ============================================
 
-// --- Auth ---
 export const auth = {
   login: (data: LoginRequest) =>
     client.post<AuthTokens>('/auth/login', data).then((r) => r.data),
@@ -113,12 +111,10 @@ export const auth = {
     client.post<AuthTokens>('/auth/refresh', { refreshToken: token }).then((r) => r.data),
 };
 
-// --- Users ---
 export const users = {
   me: () => client.get<User>('/users/me').then((r) => r.data),
 };
 
-// --- API Keys ---
 export const apiKeys = {
   list: () => client.get<ApiKey[]>('/keys').then((r) => r.data),
   add: (data: AddApiKeyRequest) => client.post<ApiKey>('/keys', data).then((r) => r.data),
@@ -126,7 +122,6 @@ export const apiKeys = {
   test: (id: string) => client.post<ApiKeyTestResult>(`/keys/${id}/test`).then((r) => r.data),
 };
 
-// --- Bots ---
 export const bots = {
   list: () => client.get<TradingBot[]>('/bots').then((r) => r.data),
   create: (data: CreateBotRequest) => client.post<TradingBot>('/bots', data).then((r) => r.data),
@@ -134,9 +129,9 @@ export const bots = {
   stop: (id: string) => client.post(`/bots/${id}/stop`).then((r) => r.data),
   status: (id: string) => client.get(`/bots/${id}/status`).then((r) => r.data),
   delete: (id: string) => client.delete(`/bots/${id}`).then((r) => r.data),
+  stats: (id: string) => client.get<BotStats>(`/bots/${id}/stats`).then((r) => r.data),
 };
 
-// --- Trading Data ---
 export const orders = {
   list: (params?: { botId?: string }) =>
     client.get<Order[]>('/orders', { params }).then((r) => r.data),
@@ -155,10 +150,21 @@ export const balances = {
   list: () => client.get<Balance[]>('/balances').then((r) => r.data),
 };
 
-// --- Market Data ---
+export const account = {
+  balance: (mode?: string) =>
+    client.get<AccountBalance>('/account/balance', { params: { mode } }).then((r) => r.data),
+  allBalances: (mode?: string) =>
+    client.get<AccountBalance[]>('/account/balances', { params: { mode } }).then((r) => r.data),
+};
+
 export const market = {
   getCandles: (symbol: string, timeframe: string, limit?: number) =>
     client.get<CandleData[]>('/market/candles', { params: { symbol, timeframe, limit } }).then((r) => r.data),
+};
+
+export const backtest = {
+  run: (data: BacktestRequest) =>
+    client.post<BacktestResult>('/backtest/run', data).then((r) => r.data),
 };
 
 export default client;
