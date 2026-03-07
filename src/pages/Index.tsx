@@ -1,15 +1,19 @@
-import { Plus } from "lucide-react";
+import { Plus, Wallet } from "lucide-react";
 import { useState } from "react";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { PositionsTable } from "@/components/trading/PositionsTable";
 import { ActiveBots } from "@/components/trading/ActiveBots";
 import { TradeHistory } from "@/components/trading/TradeHistory";
 import { CreateBotDialog } from "@/components/trading/CreateBotDialog";
+import { NotificationPanel } from "@/components/trading/NotificationPanel";
 import { useBots } from "@/hooks/api/useBots";
+import { useAccountBalance } from "@/hooks/api/useAccountBalance";
+import { cn } from "@/lib/utils";
 
 const Dashboard = () => {
   const [createBotOpen, setCreateBotOpen] = useState(false);
   const { data: botsList } = useBots();
+  const { data: balance } = useAccountBalance();
 
   const runningBots = botsList?.filter((b) => b.status === 'RUNNING') ?? [];
   const totalPnl = botsList?.reduce((sum, b) => sum + (b.pnl ?? 0), 0) ?? 0;
@@ -20,7 +24,7 @@ const Dashboard = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Binance TESTNET · EMA Crossover Strategy</p>
+          <p className="text-sm text-muted-foreground">Trading Overview</p>
         </div>
         <button
           onClick={() => setCreateBotOpen(true)}
@@ -31,7 +35,7 @@ const Dashboard = () => {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-xs text-muted-foreground uppercase">Running Bots</div>
           <div className="mt-1 text-2xl font-bold text-foreground">{runningBots.length}</div>
@@ -42,8 +46,16 @@ const Dashboard = () => {
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-xs text-muted-foreground uppercase">Total P&L</div>
-          <div className={`mt-1 text-2xl font-bold font-mono ${totalPnl >= 0 ? 'text-profit' : 'text-loss'}`}>
+          <div className={cn("mt-1 text-2xl font-bold font-mono", totalPnl >= 0 ? 'text-profit' : 'text-loss')}>
             {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground uppercase">
+            <Wallet className="h-3 w-3" /> USDT Balance
+          </div>
+          <div className="mt-1 text-2xl font-bold font-mono text-foreground">
+            ${balance?.available?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? '—'}
           </div>
         </div>
       </div>
@@ -52,7 +64,10 @@ const Dashboard = () => {
         <div className="xl:col-span-2">
           <TradingChart />
         </div>
-        <ActiveBots />
+        <div className="space-y-6">
+          <ActiveBots />
+          <NotificationPanel />
+        </div>
       </div>
 
       <PositionsTable />

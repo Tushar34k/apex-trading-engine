@@ -50,6 +50,9 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
   const [stopLossPercent, setStopLossPercent] = useState(5);
   const [enableTP, setEnableTP] = useState(false);
   const [takeProfitPercent, setTakeProfitPercent] = useState(10);
+  const [enableTrailing, setEnableTrailing] = useState(false);
+  const [trailingStopPercent, setTrailingStopPercent] = useState(2);
+  const [maxDailyLossPercent, setMaxDailyLossPercent] = useState(0);
 
   const createBot = useCreateBot();
   const { data: keysList } = useApiKeys();
@@ -76,10 +79,11 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
       const fastEma = strategyParams.fastEma ?? 9;
       const slowEma = strategyParams.slowEma ?? 21;
 
-      // Build final params with optional SL/TP
-      const finalParams = { ...strategyParams };
+      const finalParams: Record<string, number> = { ...strategyParams };
       if (enableSL) finalParams.stopLossPercent = stopLossPercent;
       if (enableTP) finalParams.takeProfitPercent = takeProfitPercent;
+      if (enableTrailing) finalParams.trailingStopPercent = trailingStopPercent;
+      if (maxDailyLossPercent > 0) finalParams.maxDailyLossPercent = maxDailyLossPercent;
 
       await createBot.mutateAsync({
         name: name.trim(),
@@ -114,6 +118,9 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
     setStopLossPercent(5);
     setEnableTP(false);
     setTakeProfitPercent(10);
+    setEnableTrailing(false);
+    setTrailingStopPercent(2);
+    setMaxDailyLossPercent(0);
   };
 
   return (
@@ -123,13 +130,11 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
           <DialogTitle>Create Trading Bot</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Bot Name */}
           <div className="space-y-2">
             <Label htmlFor="botName">Bot Name</Label>
             <Input id="botName" placeholder="e.g. BTC Scalper" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
-          {/* API Key + Exchange Mode */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>API Key</Label>
@@ -156,7 +161,6 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             </div>
           </div>
 
-          {/* Live trading warning */}
           {exchangeMode === "LIVE" && (
             <div className="flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
               <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -164,7 +168,6 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             </div>
           )}
 
-          {/* Symbol + Timeframe */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="symbol">Symbol</Label>
@@ -184,7 +187,6 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             </div>
           </div>
 
-          {/* Strategy Selection */}
           <div className="space-y-2">
             <Label>Strategy</Label>
             <Select value={strategyType} onValueChange={handleStrategyChange}>
@@ -198,7 +200,6 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             <p className="text-xs text-muted-foreground">{STRATEGY_CONFIGS[strategyType].description}</p>
           </div>
 
-          {/* Dynamic Strategy Parameters */}
           <div className="space-y-2">
             <Label>Strategy Parameters</Label>
             <div className="grid grid-cols-2 gap-3">
@@ -219,18 +220,17 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             </div>
           </div>
 
-          {/* Trade Size */}
           <div className="space-y-2">
             <Label htmlFor="tradeSize">Trade Size % (of USDT balance)</Label>
             <Input id="tradeSize" type="number" min={1} max={100} value={tradeSizePercent}
               onChange={(e) => setTradeSizePercent(Number(e.target.value))} />
           </div>
 
-          {/* Risk Management: Stop-Loss / Take-Profit */}
+          {/* Risk Management */}
           <div className="space-y-3 rounded-md border border-border p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <ShieldCheck className="h-4 w-4 text-primary" />
-              Risk Management (optional)
+              Risk Management
             </div>
 
             <div className="flex items-center justify-between">
@@ -258,6 +258,25 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
                 <p className="text-[10px] text-muted-foreground">Auto-sell if price rises this % above entry</p>
               </div>
             )}
+
+            <div className="flex items-center justify-between">
+              <Label htmlFor="ts-toggle" className="text-sm">Trailing Stop</Label>
+              <Switch id="ts-toggle" checked={enableTrailing} onCheckedChange={setEnableTrailing} />
+            </div>
+            {enableTrailing && (
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Trailing Stop %</Label>
+                <Input type="number" min={0.5} max={20} step={0.5} value={trailingStopPercent}
+                  onChange={(e) => setTrailingStopPercent(Number(e.target.value))} />
+                <p className="text-[10px] text-muted-foreground">Follows price up, sells if price drops this % from peak</p>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Max Daily Loss % (0 = disabled)</Label>
+              <Input type="number" min={0} max={50} step={0.5} value={maxDailyLossPercent}
+                onChange={(e) => setMaxDailyLossPercent(Number(e.target.value))} />
+            </div>
           </div>
 
           {/* Summary */}
@@ -269,6 +288,8 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
             <Badge variant="outline">{tradeSizePercent}% size</Badge>
             {enableSL && <Badge variant="outline" className="text-destructive border-destructive/30">SL {stopLossPercent}%</Badge>}
             {enableTP && <Badge variant="outline" className="text-profit border-profit/30">TP {takeProfitPercent}%</Badge>}
+            {enableTrailing && <Badge variant="outline" className="text-warning border-warning/30">Trail {trailingStopPercent}%</Badge>}
+            {maxDailyLossPercent > 0 && <Badge variant="outline">Max Loss {maxDailyLossPercent}%/day</Badge>}
           </div>
 
           <DialogFooter>

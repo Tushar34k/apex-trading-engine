@@ -8,6 +8,8 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Index from "./pages/Index";
 import ApiKeys from "./pages/ApiKeys";
+import Analytics from "./pages/Analytics";
+import Backtesting from "./pages/Backtesting";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
@@ -36,6 +38,8 @@ const App = () => (
               <Route element={<AppLayout />}>
                 <Route path="/" element={<Index />} />
                 <Route path="/api-keys" element={<ApiKeys />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/backtesting" element={<Backtesting />} />
               </Route>
             </Route>
             <Route path="*" element={<NotFound />} />
