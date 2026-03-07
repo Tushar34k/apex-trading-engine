@@ -58,6 +58,8 @@ export interface ApiKeyTestResult {
 // --- Trading Bots ---
 
 export type BotStatus = 'RUNNING' | 'STOPPED';
+export type ExchangeMode = 'TESTNET' | 'LIVE';
+export type StrategyType = 'EMA_CROSS' | 'SCALPING_EMA' | 'SUPPORT_RESISTANCE';
 
 export interface TradingBot {
   id: string;
@@ -65,11 +67,13 @@ export interface TradingBot {
   name: string;
   symbol: string;
   timeframe: string;
-  strategyType: string;
+  strategyType: StrategyType;
   fastEma: number;
   slowEma: number;
   tradeSizePercent: number;
   status: BotStatus;
+  exchangeMode: ExchangeMode;
+  strategyParams: string | null;
   hasOpenPosition: boolean;
   entryPrice: number | null;
   quantity: number | null;
@@ -78,7 +82,6 @@ export interface TradingBot {
   lastTradeTime: string | null;
   isProcessing: boolean;
   createdAt: string;
-  // Computed fields from API
   pnl?: number;
   totalTrades?: number;
   winRate?: number;
@@ -88,11 +91,13 @@ export interface CreateBotRequest {
   name: string;
   symbol: string;
   timeframe: string;
-  strategyType: string;
+  strategyType: StrategyType;
   fastEma: number;
   slowEma: number;
   tradeSizePercent: number;
   apiKeyId: string;
+  exchangeMode: ExchangeMode;
+  strategyParams?: string;
 }
 
 // --- Trades ---
