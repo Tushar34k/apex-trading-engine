@@ -95,7 +95,11 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                BigDecimal currentPrice = binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
+                // Read price from WebSocket cache first, fallback to REST
+                Double cachedPrice = streamClient.getLatestPrice(bot.getSymbol());
+                BigDecimal currentPrice = cachedPrice != null
+                    ? BigDecimal.valueOf(cachedPrice)
+                    : binance.getTickerPrice(bot.getSymbol(), exchangeBaseUrl);
 
                 // Trailing stop check
                 if (params.containsKey("trailingStopPercent")) {
