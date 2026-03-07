@@ -1,15 +1,18 @@
-import { Circle, Wifi, WifiOff, LogOut, FlaskConical } from "lucide-react";
+import { Circle, Wifi, WifiOff, LogOut, FlaskConical, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useWebSocket, useMarketPrice } from "@/hooks/useWebSocket";
 import { useBots } from "@/hooks/api/useBots";
+import { useAccountBalance } from "@/hooks/api/useAccountBalance";
 
 export function TopBar() {
   const { user, logout } = useAuth();
   const { connected } = useWebSocket();
   const btcPrice = useMarketPrice('BTCUSDT');
   const { data: botsList } = useBots();
+  const { data: balance } = useAccountBalance();
 
   const activeBotCount = botsList?.filter((b) => b.status === 'RUNNING').length ?? 0;
+  const hasLiveBot = botsList?.some((b) => b.status === 'RUNNING' && b.exchangeMode === 'LIVE');
   const initials = user?.email?.slice(0, 2).toUpperCase() ?? '??';
 
   return (
@@ -32,9 +35,24 @@ export function TopBar() {
             {btcPrice.price ? `$${btcPrice.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
           </span>
         </span>
-        <div className="flex items-center gap-1.5 rounded-md bg-warning/10 border border-warning/20 px-2.5 py-1">
-          <FlaskConical className="h-3.5 w-3.5 text-warning" />
-          <span className="text-[10px] font-bold text-warning uppercase tracking-wider">Testnet</span>
+        {balance && (
+          <>
+            <div className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Wallet className="h-3 w-3" />
+              <span className="font-mono">${balance.available?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? '0.00'}</span>
+            </div>
+          </>
+        )}
+        <div className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 ${
+          hasLiveBot
+            ? 'bg-destructive/10 border-destructive/20'
+            : 'bg-warning/10 border-warning/20'
+        }`}>
+          <FlaskConical className={`h-3.5 w-3.5 ${hasLiveBot ? 'text-destructive' : 'text-warning'}`} />
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${hasLiveBot ? 'text-destructive' : 'text-warning'}`}>
+            {hasLiveBot ? 'LIVE' : 'Testnet'}
+          </span>
         </div>
       </div>
       <div className="flex items-center gap-4">

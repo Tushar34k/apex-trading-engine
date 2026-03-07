@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 
 import static com.tradeengine.controller.UserController.getUserId;
@@ -38,7 +39,7 @@ public class BotController {
         private BigDecimal tradeSizePercent = new BigDecimal("10");
         @NotBlank private String apiKeyId;
         private String exchangeMode = "TESTNET";
-        private String strategyParams; // JSON string
+        private String strategyParams;
     }
 
     @GetMapping
@@ -96,6 +97,47 @@ public class BotController {
         return ResponseEntity.ok(toMap(bot));
     }
 
+    @GetMapping("/{id}/stats")
+    public ResponseEntity<?> stats(@PathVariable String id) {
+        UUID botId = UUID.fromString(id);
+        var bot = botRepo.findById(botId).orElse(null);
+        if (bot == null) return ResponseEntity.notFound().build();
+        if (!bot.getUserId().equals(getUserId())) return ResponseEntity.status(403).build();
+
+        List<TradePosition> positions = positionRepo.findByBotId(botId);
+        BigDecimal totalPnl = BigDecimal.ZERO;
+        int totalTrades = 0, wins = 0, losses = 0;
+        BigDecimal totalProfit = BigDecimal.ZERO, totalLoss = BigDecimal.ZERO;
+
+        for (TradePosition p : positions) {
+            if ("CLOSED".equals(p.getStatus()) && p.getRealizedPnl() != null) {
+                totalPnl = totalPnl.add(p.getRealizedPnl());
+                totalTrades++;
+                if (p.getRealizedPnl().compareTo(BigDecimal.ZERO) > 0) {
+                    wins++;
+                    totalProfit = totalProfit.add(p.getRealizedPnl());
+                } else {
+                    losses++;
+                    totalLoss = totalLoss.add(p.getRealizedPnl());
+                }
+            }
+        }
+
+        double winRate = totalTrades > 0 ? (double) wins / totalTrades * 100 : 0;
+        double avgProfit = wins > 0 ? totalProfit.divide(BigDecimal.valueOf(wins), 2, RoundingMode.HALF_UP).doubleValue() : 0;
+        double avgLoss = losses > 0 ? totalLoss.divide(BigDecimal.valueOf(losses), 2, RoundingMode.HALF_UP).doubleValue() : 0;
+
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("pnl", totalPnl);
+        stats.put("totalTrades", totalTrades);
+        stats.put("wins", wins);
+        stats.put("losses", losses);
+        stats.put("winRate", Math.round(winRate * 10) / 10.0);
+        stats.put("avgProfit", avgProfit);
+        stats.put("avgLoss", avgLoss);
+        return ResponseEntity.ok(stats);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable String id) {
         UUID botId = UUID.fromString(id);
@@ -110,7 +152,6 @@ public class BotController {
     }
 
     private Map<String, Object> toMap(TradingBot b) {
-        // Compute real PnL and trade count from positions table
         List<TradePosition> allPositions = positionRepo.findByBotId(b.getId());
         BigDecimal totalPnl = BigDecimal.ZERO;
         int totalTrades = 0;

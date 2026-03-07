@@ -1,5 +1,5 @@
 // ============================================
-// Domain Types — V1 Production Trading Bot
+// Domain Types — Production Trading Bot
 // ============================================
 
 // --- Auth ---
@@ -168,6 +168,68 @@ export interface Balance {
   usdValue: number;
 }
 
+export interface AccountBalance {
+  asset: string;
+  available: number;
+  locked: number;
+  total: number;
+}
+
+// --- Bot Stats ---
+
+export interface BotStats {
+  pnl: number;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  avgProfit: number;
+  avgLoss: number;
+}
+
+// --- Backtest ---
+
+export interface BacktestRequest {
+  symbol: string;
+  strategyType: string;
+  timeframe: string;
+  initialBalance: number;
+  strategyParams: Record<string, number>;
+  candleLimit: number;
+}
+
+export interface BacktestResult {
+  profitPercent: number;
+  winRate: number;
+  totalTrades: number;
+  maxDrawdown: number;
+  finalBalance: number;
+  totalProfit: number;
+  wins: number;
+  losses: number;
+  trades: Array<{
+    entryPrice: number;
+    exitPrice: number;
+    quantity: number;
+    pnl: number;
+    side: string;
+  }>;
+  equityCurve: number[][];
+}
+
+// --- Notifications ---
+
+export interface TradeNotification {
+  type: 'BOT_BUY' | 'BOT_SELL' | 'BOT_SL' | 'BOT_TP' | 'BOT_TRAILING_SL' | 'RISK_BLOCKED';
+  botName: string;
+  symbol: string;
+  message: string;
+  timestamp: string;
+  price?: number;
+  quantity?: number;
+  pnl?: number;
+}
+
 // --- WebSocket Events ---
 
 export interface PriceUpdateEvent {
@@ -197,9 +259,19 @@ export interface PositionUpdateEvent {
   position: Position;
 }
 
+export interface NotificationEvent {
+  type: string;
+  botName: string;
+  symbol: string;
+  message: string;
+  timestamp: string;
+  [key: string]: unknown;
+}
+
 export type WebSocketEvent =
   | PriceUpdateEvent
   | OrderUpdateEvent
   | TradeOpenedEvent
   | TradeClosedEvent
-  | PositionUpdateEvent;
+  | PositionUpdateEvent
+  | NotificationEvent;
