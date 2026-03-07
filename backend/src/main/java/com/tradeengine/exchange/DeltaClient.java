@@ -250,12 +250,6 @@ public class DeltaClient implements ExchangeClient {
         return "DELTA";
     }
 
-    @Value("${exchange.delta.live-url:" + LIVE_URL + "}")
-    private String liveBaseUrl;
-
-    @Value("${exchange.delta.testnet-url:" + TESTNET_URL + "}")
-    private String testnetBaseUrl;
-
     @Override
     public String resolveBaseUrl(String mode) {
         if ("LIVE".equalsIgnoreCase(mode)) {
