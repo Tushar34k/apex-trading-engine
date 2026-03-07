@@ -1,6 +1,7 @@
 package com.tradeengine.service;
 
-import com.tradeengine.exchange.BinanceClient;
+import com.tradeengine.exchange.ExchangeClient;
+import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.strategy.StrategyFactory;
 import com.tradeengine.strategy.TradingStrategy;
 import lombok.Data;
@@ -8,8 +9,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -18,7 +17,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BacktestService {
 
-    private final BinanceClient binance;
+    private final ExchangeFactory exchangeFactory;
 
     @Data
     public static class BacktestRequest {
@@ -28,6 +27,7 @@ public class BacktestService {
         private double initialBalance;
         private Map<String, Object> strategyParams;
         private int candleLimit = 500;
+        private String exchange = "BINANCE";
     }
 
     @Data
@@ -45,10 +45,17 @@ public class BacktestService {
     }
 
     public BacktestResult runBacktest(BacktestRequest req) {
-        log.info("Running backtest: {} {} {} candles={}", req.symbol, req.strategyType, req.timeframe, req.candleLimit);
+        if (req.getExchange() == null || req.getExchange().isBlank()) {
+            throw new IllegalArgumentException("Exchange field is required for backtesting");
+        }
 
-        // Fetch historical candles
-        List<double[]> candles = binance.getCandles(req.symbol, req.timeframe, req.candleLimit);
+        ExchangeClient client = exchangeFactory.getClient(req.getExchange());
+        String baseUrl = client.resolveBaseUrl("TESTNET");
+
+        log.info("Running backtest on {}: {} {} {} candles={}",
+            req.getExchange(), req.symbol, req.strategyType, req.timeframe, req.candleLimit);
+
+        List<double[]> candles = client.getCandles(req.symbol, req.timeframe, req.candleLimit, baseUrl);
         if (candles.size() < 50) {
             throw new RuntimeException("Not enough candle data for backtest (need 50+, got " + candles.size() + ")");
         }
@@ -67,7 +74,6 @@ public class BacktestService {
         double positionQty = 0;
         int wins = 0, losses = 0;
 
-        // Walk through candles starting at index 50
         for (int i = 50; i < candles.size(); i++) {
             List<Double> closingPrices = candles.subList(0, i + 1).stream()
                 .map(c -> c[4]).collect(Collectors.toList());
@@ -77,7 +83,7 @@ public class BacktestService {
             double currentPrice = candles.get(i)[4];
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !inPosition) {
-                double tradeAmount = balance * 0.10; // 10% per trade
+                double tradeAmount = balance * 0.10;
                 positionQty = tradeAmount / currentPrice;
                 entryPrice = currentPrice;
                 balance -= tradeAmount;
@@ -103,7 +109,6 @@ public class BacktestService {
                 entryPrice = 0;
             }
 
-            // Track equity
             double equity = balance + (inPosition ? positionQty * currentPrice : 0);
             peakBalance = Math.max(peakBalance, equity);
             double drawdown = peakBalance > 0 ? (peakBalance - equity) / peakBalance * 100 : 0;
@@ -112,7 +117,6 @@ public class BacktestService {
             result.getEquityCurve().add(new double[]{candles.get(i)[0], equity});
         }
 
-        // Close open position at last price
         if (inPosition) {
             double lastPrice = candles.get(candles.size() - 1)[4];
             balance += positionQty * lastPrice;
@@ -128,8 +132,8 @@ public class BacktestService {
         result.setWins(wins);
         result.setLosses(losses);
 
-        log.info("Backtest complete: {} trades, {:.2f}% profit, {:.1f}% win rate",
-            totalTrades, result.getProfitPercent(), result.getWinRate());
+        log.info("Backtest complete on {}: {} trades, {}% profit, {}% win rate",
+            req.getExchange(), totalTrades, result.getProfitPercent(), result.getWinRate());
 
         return result;
     }
