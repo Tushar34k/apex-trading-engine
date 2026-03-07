@@ -37,6 +37,12 @@ public class DeltaClient implements ExchangeClient {
     @Value("${exchange.delta.base-url:" + TESTNET_URL + "}")
     private String defaultBaseUrl;
 
+    @Value("${exchange.delta.live-url:" + LIVE_URL + "}")
+    private String liveBaseUrl;
+
+    @Value("${exchange.delta.testnet-url:" + TESTNET_URL + "}")
+    private String testnetBaseUrl;
+
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .build();
