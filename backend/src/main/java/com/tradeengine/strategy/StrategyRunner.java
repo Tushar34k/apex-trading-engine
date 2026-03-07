@@ -49,6 +49,9 @@ public class StrategyRunner {
     private final KillSwitchService killSwitch;
     private final SignalDebounceService debounceService;
     private final CircuitBreakerService circuitBreaker;
+    private final PositionTracker positionTracker;
+    private final SignalDebounceService debounceService;
+    private final CircuitBreakerService circuitBreaker;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
@@ -283,11 +286,16 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
+        final Map<String, Object> riskParams = new HashMap<>(params);
+        final String exName = exchangeName;
+        final String exMode = bot.getExchangeMode();
+        final String exBaseUrl = exchangeBaseUrl;
+
         request.getResultFuture()
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
-                    handleBuyFilled(bot, result);
+                    handleBuyFilled(bot, result, apiKey, secret, exName, exMode, exBaseUrl, riskParams);
                 } else {
                     log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
                     circuitBreaker.recordFailure();
@@ -362,7 +370,10 @@ public class StrategyRunner {
             });
     }
 
-    private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result) {
+    private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result,
+                                   String apiKey, String apiSecret,
+                                   String exchangeName, String exchangeMode, String exchangeBaseUrl,
+                                   Map<String, Object> params) {
         TradeOrder order = new TradeOrder();
         order.setBotId(bot.getId());
         order.setUserId(bot.getUserId());
@@ -392,6 +403,38 @@ public class StrategyRunner {
         position.setEntryPrice(result.getAvgPrice());
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
+
+        // Register with PositionTracker for real-time risk monitoring
+        BigDecimal slPrice = params.containsKey("stopLossPercent")
+            ? result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
+                BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)))
+            : null;
+        BigDecimal tpPrice = params.containsKey("takeProfitPercent")
+            ? result.getAvgPrice().multiply(BigDecimal.ONE.add(
+                BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)))
+            : null;
+        BigDecimal trailingPct = params.containsKey("trailingStopPercent")
+            ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
+            : null;
+
+        positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
+            .botId(bot.getId())
+            .userId(bot.getUserId())
+            .symbol(bot.getSymbol())
+            .exchange(exchangeName)
+            .exchangeMode(exchangeMode)
+            .entryPrice(result.getAvgPrice())
+            .quantity(result.getExecutedQty())
+            .apiKey(apiKey)
+            .apiSecret(apiSecret)
+            .exchangeBaseUrl(exchangeBaseUrl)
+            .stopLossPrice(slPrice)
+            .takeProfitPrice(tpPrice)
+            .trailingStopPercent(trailingPct)
+            .highestPriceSeen(result.getAvgPrice())
+            .lowestPriceSeen(result.getAvgPrice())
+            .openedAt(Instant.now())
+            .build());
 
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
         publisher.publishPositionOpened(bot.getUserId().toString(), position);
@@ -440,6 +483,7 @@ public class StrategyRunner {
         botRepo.save(bot);
 
         trailingStopService.resetBot(bot.getId());
+        positionTracker.removePosition(bot.getId());
         publisher.publishOrderFilled(bot.getUserId().toString(), order);
 
         String userId = bot.getUserId().toString();
