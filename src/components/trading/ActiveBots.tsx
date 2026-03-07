@@ -1,7 +1,7 @@
-import { Bot, Circle, Play, Square } from "lucide-react";
+import { Bot, Circle, Play, Square, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { useBots, useStartBot, useStopBot } from "@/hooks/api/useBots";
+import { useBots, useStartBot, useStopBot, useDeleteBot } from "@/hooks/api/useBots";
 import type { TradingBot } from "@/types";
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -14,6 +14,7 @@ export function ActiveBots() {
   const { data: botsList, isLoading } = useBots();
   const startBot = useStartBot();
   const stopBot = useStopBot();
+  const deleteBot = useDeleteBot();
 
   if (isLoading) {
     return (
@@ -50,7 +51,8 @@ export function ActiveBots() {
                       <span className="text-sm font-medium text-foreground">{bot.name}</span>
                       <Circle className={cn("h-1.5 w-1.5 fill-current",
                         bot.status === "RUNNING" ? "text-primary" : "text-muted-foreground")} />
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                      <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0",
+                        bot.exchangeMode === "LIVE" ? "border-destructive/50 text-destructive" : "")}>
                         {bot.exchangeMode === "LIVE" ? "LIVE" : "TEST"}
                       </Badge>
                     </div>
@@ -58,7 +60,7 @@ export function ActiveBots() {
                       {bot.symbol} · {bot.timeframe} · {STRATEGY_LABELS[bot.strategyType] ?? bot.strategyType} · {bot.tradeSizePercent}%
                     </div>
                     {bot.hasOpenPosition && (
-                      <div className="text-[10px] text-amber-500 font-mono">
+                      <div className="text-[10px] text-warning font-mono">
                         OPEN @ ${bot.entryPrice?.toLocaleString()} · Qty: {bot.quantity}
                       </div>
                     )}
@@ -67,11 +69,11 @@ export function ActiveBots() {
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className={cn("font-mono text-sm font-semibold",
-                      isProfitable ? "text-primary" : "text-destructive")}>
+                      isProfitable ? "text-profit" : "text-loss")}>
                       {isProfitable ? '+' : ''}${pnl.toFixed(2)}
                     </div>
                     <div className="text-[10px] text-muted-foreground">
-                      {bot.totalTrades ?? 0} trades
+                      {bot.totalTrades ?? 0} trades · {bot.winRate ?? 0}% win
                     </div>
                   </div>
                   <button
@@ -84,6 +86,17 @@ export function ActiveBots() {
                   >
                     {bot.status === 'RUNNING' ? <Square className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                   </button>
+                  {bot.status !== 'RUNNING' && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete bot "${bot.name}"?`)) deleteBot.mutate(bot.id);
+                      }}
+                      disabled={deleteBot.isPending}
+                      className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );

@@ -9,6 +9,7 @@ import java.util.UUID;
 public interface PositionRepository extends JpaRepository<TradePosition, UUID> {
     List<TradePosition> findByUserIdAndStatus(UUID userId, String status);
     List<TradePosition> findByUserId(UUID userId);
+    List<TradePosition> findByBotId(UUID botId);
     List<TradePosition> findByBotIdAndStatus(UUID botId, String status);
     Optional<TradePosition> findByBotIdAndSymbolAndStatus(UUID botId, String symbol, String status);
     boolean existsByBotIdAndSymbolAndStatus(UUID botId, String symbol, String status);
