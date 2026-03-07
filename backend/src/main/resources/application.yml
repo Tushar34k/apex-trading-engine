@@ -24,7 +24,7 @@ exchange:
     base-url: ${BINANCE_BASE_URL:https://testnet.binance.vision}
     recv-window: 5000
   delta:
-    base-url: ${DELTA_BASE_URL:https://testnet-api.delta.exchange}
+    base-url: ${DELTA_BASE_URL:https://cdn-ind.testnet.deltaex.org}
   bybit:
     base-url: ${BYBIT_BASE_URL:https://api-testnet.bybit.com}
 
