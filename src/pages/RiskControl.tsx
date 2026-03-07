@@ -4,7 +4,7 @@ import { usePositions } from "@/hooks/api/useTrades";
 import { useNotifications } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import type { TradingBot } from "@/types";
+import type { TradingBot, Position } from "@/types";
 
 export default function RiskControl() {
   const { data: botsList } = useBots();
