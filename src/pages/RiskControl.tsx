@@ -13,7 +13,8 @@ export default function RiskControl() {
 
   const bots = botsList ?? [];
   const positions = positionsList ?? [];
-  const riskAlerts = notifications.filter(
+  const { notifications: allNotifications } = useNotifications();
+  const riskAlerts = allNotifications.filter(
     (n) => n.type === "RISK_BLOCKED" || n.type === "BOT_SL" || n.type === "BOT_TRAILING_SL"
   );
 
