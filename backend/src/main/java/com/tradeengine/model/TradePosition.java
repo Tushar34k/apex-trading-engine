@@ -44,6 +44,9 @@ public class TradePosition {
     @Column(nullable = false)
     private String status = "OPEN"; // OPEN, CLOSED
 
+    @Column
+    private String exchange; // BINANCE, DELTA, BYBIT
+
     @Column(name = "opened_at")
     private Instant openedAt = Instant.now();
 
