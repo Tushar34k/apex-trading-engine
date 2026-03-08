@@ -86,7 +86,6 @@ public class TradeExecutionQueue {
         }
         requestTimestamps.put(request.getRequestId(), System.currentTimeMillis());
         cleanupExpiredRequests();
-        }
 
         // Live trading safety gate
         if ("LIVE".equalsIgnoreCase(request.getExchangeMode()) && !liveTradingEnabled) {
