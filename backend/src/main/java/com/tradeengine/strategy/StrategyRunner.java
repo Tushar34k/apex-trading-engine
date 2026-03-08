@@ -145,7 +145,7 @@ public class StrategyRunner {
                     if (trailingStopService.checkTrailingStop(bot.getId(), currentPrice, bot.getEntryPrice(), tsPct)) {
                         log.warn("Bot {} TRAILING STOP triggered @ {}", bot.getId(), currentPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Trailing stop triggered", exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL", exchangeName);
+                            "Trailing stop triggered", exchangeBaseUrl, symbolInfo, "BOT_TRAILING_SL", exchangeName, exchangeSymbol);
                         return;
                     }
                 }
