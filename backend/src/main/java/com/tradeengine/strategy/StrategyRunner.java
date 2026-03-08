@@ -178,7 +178,7 @@ public class StrategyRunner {
             }
 
             // --- Fetch candles via exchange client ---
-            List<double[]> candles = exchangeClient.getCandles(bot.getSymbol(), bot.getTimeframe(), 100, exchangeBaseUrl);
+            List<double[]> candles = exchangeClient.getCandles(exchangeSymbol, bot.getTimeframe(), 100, exchangeBaseUrl);
             if (candles.size() < 50) {
                 log.warn("Bot {}: only {} candles, need 50+. Skip.", bot.getId(), candles.size());
                 return;
