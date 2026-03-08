@@ -158,7 +158,7 @@ public class StrategyRunner {
                     if (currentPrice.compareTo(slPrice) <= 0) {
                         log.warn("Bot {} STOP-LOSS triggered: price {} <= SL {}", bot.getId(), currentPrice, slPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Stop-loss triggered at " + slPct + "%", exchangeBaseUrl, symbolInfo, "BOT_SL", exchangeName);
+                            "Stop-loss triggered at " + slPct + "%", exchangeBaseUrl, symbolInfo, "BOT_SL", exchangeName, exchangeSymbol);
                         return;
                     }
                 }
