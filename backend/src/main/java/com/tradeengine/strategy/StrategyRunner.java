@@ -469,8 +469,9 @@ public class StrategyRunner {
             pnl = result.getAvgPrice().subtract(bot.getEntryPrice()).multiply(bot.getQuantity());
         }
 
+        // Search by botId + OPEN status (more reliable than symbol match for multi-exchange)
         TradePosition position = positionRepo
-            .findByBotIdAndSymbolAndStatus(bot.getId(), bot.getSymbol(), "OPEN").orElse(null);
+            .findByBotIdAndStatus(bot.getId(), "OPEN").orElse(null);
         if (position != null) {
             position.setStatus("CLOSED");
             position.setExitPrice(result.getAvgPrice());
