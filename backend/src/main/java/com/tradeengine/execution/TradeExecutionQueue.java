@@ -39,8 +39,10 @@ public class TradeExecutionQueue {
     // Per-bot pending trade protection
     private final ConcurrentHashMap<UUID, Boolean> pendingTrades = new ConcurrentHashMap<>();
 
-    // Request-level duplicate protection
+    // Request-level duplicate protection (bounded: entries expire after processing)
     private final Set<UUID> processedRequests = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<UUID, Long> requestTimestamps = new ConcurrentHashMap<>();
+    private static final long REQUEST_EXPIRY_MS = 300_000; // 5 minutes
 
     private final AtomicLong totalSubmitted = new AtomicLong();
     private final AtomicLong totalExecuted = new AtomicLong();
@@ -81,6 +83,9 @@ public class TradeExecutionQueue {
                 .success(false).errorMessage("Duplicate trade request ignored").build());
             totalFailed.incrementAndGet();
             return;
+        }
+        requestTimestamps.put(request.getRequestId(), System.currentTimeMillis());
+        cleanupExpiredRequests();
         }
 
         // Live trading safety gate
@@ -280,6 +285,18 @@ public class TradeExecutionQueue {
             .success(false)
             .errorMessage("All " + MAX_RETRIES + " attempts failed on " + req.getExchange())
             .build();
+    }
+
+    // --- Cleanup ---
+    private void cleanupExpiredRequests() {
+        long now = System.currentTimeMillis();
+        requestTimestamps.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() > REQUEST_EXPIRY_MS) {
+                processedRequests.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
     }
 
     // --- Metrics ---

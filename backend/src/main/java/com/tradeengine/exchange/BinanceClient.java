@@ -266,14 +266,14 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
-    public List<JsonNode> getOpenOrders(String apiKey, String secret, String symbol) {
+    public List<JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl) {
         try {
             String params = "symbol=" + symbol + "&recvWindow=" + recvWindow
                 + "&timestamp=" + System.currentTimeMillis();
             String signature = sign(params, secret);
             params += "&signature=" + signature;
 
-            String url = defaultBaseUrl + "/api/v3/openOrders?" + params;
+            String url = resolveBase(baseUrl) + "/api/v3/openOrders?" + params;
             String body = get(url, apiKey);
             return List.of(mapper.readTree(body));
         } catch (Exception e) {

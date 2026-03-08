@@ -59,9 +59,17 @@ public class DeltaClient implements ExchangeClient {
             String path = "/v2/orders";
             long timestamp = System.currentTimeMillis() / 1000; // Delta uses seconds
 
+            int contractSize = quantity.intValue();
+            if (contractSize <= 0) {
+                throw new IllegalArgumentException("Delta requires integer contract size > 0, got: " + quantity);
+            }
+            if (quantity.stripTrailingZeros().scale() > 0) {
+                log.warn("[DELTA] Quantity {} truncated to {} for integer contract size", quantity, contractSize);
+            }
+
             String body = mapper.writeValueAsString(new java.util.LinkedHashMap<>() {{
                 put("product_symbol", symbol);
-                put("size", quantity.intValue()); // Delta uses integer contract size
+                put("size", contractSize);
                 put("side", side.toLowerCase());
                 put("order_type", "market_order");
             }});
@@ -102,9 +110,17 @@ public class DeltaClient implements ExchangeClient {
             String path = "/v2/orders";
             long timestamp = System.currentTimeMillis() / 1000;
 
+            int contractSize = quantity.intValue();
+            if (contractSize <= 0) {
+                throw new IllegalArgumentException("Delta requires integer contract size > 0, got: " + quantity);
+            }
+            if (quantity.stripTrailingZeros().scale() > 0) {
+                log.warn("[DELTA] Quantity {} truncated to {} for integer contract size", quantity, contractSize);
+            }
+
             String body = mapper.writeValueAsString(new java.util.LinkedHashMap<>() {{
                 put("product_symbol", symbol);
-                put("size", quantity.intValue());
+                put("size", contractSize);
                 put("side", side.toLowerCase());
                 put("order_type", "limit_order");
                 put("limit_price", price.toPlainString());
