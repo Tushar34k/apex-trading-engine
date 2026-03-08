@@ -130,13 +130,13 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                Double freshPrice = streamClient.getFreshPrice(bot.getSymbol());
+                Double freshPrice = streamClient.getFreshPrice(exchangeSymbol);
                 BigDecimal currentPrice;
                 if (freshPrice != null) {
                     currentPrice = BigDecimal.valueOf(freshPrice);
                 } else {
-                    log.debug("Bot {} price stale/missing for {}, falling back to REST via {}", bot.getId(), bot.getSymbol(), exchangeName);
-                    currentPrice = exchangeClient.getPrice(bot.getSymbol(), exchangeBaseUrl);
+                    log.debug("Bot {} price stale/missing for {}, falling back to REST via {}", bot.getId(), exchangeSymbol, exchangeName);
+                    currentPrice = exchangeClient.getPrice(exchangeSymbol, exchangeBaseUrl);
                 }
 
                 // Trailing stop check
