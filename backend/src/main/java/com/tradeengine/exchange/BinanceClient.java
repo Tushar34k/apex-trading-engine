@@ -282,6 +282,46 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
+    @Override
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+        try {
+            long timestamp = System.currentTimeMillis();
+            String params = "recvWindow=" + recvWindow + "&timestamp=" + timestamp;
+            String signature = sign(params, secret);
+            params += "&signature=" + signature;
+
+            // Use futures position risk endpoint
+            String url = resolveBase(baseUrl).replace("api.binance.com", "fapi.binance.com")
+                .replace("testnet.binance.vision", "testnet.binancefuture.com")
+                + "/fapi/v2/positionRisk?" + params;
+
+            String body = get(url, apiKey);
+            JsonNode arr = mapper.readTree(body);
+
+            List<ExchangePosition> positions = new ArrayList<>();
+            if (arr.isArray()) {
+                for (JsonNode p : arr) {
+                    BigDecimal posAmt = new BigDecimal(p.path("positionAmt").asText("0"));
+                    if (posAmt.abs().compareTo(BigDecimal.ZERO) == 0) continue;
+
+                    positions.add(ExchangePosition.builder()
+                        .exchange("BINANCE")
+                        .symbol(p.path("symbol").asText())
+                        .side(posAmt.compareTo(BigDecimal.ZERO) > 0 ? "LONG" : "SHORT")
+                        .size(posAmt.abs())
+                        .entryPrice(new BigDecimal(p.path("entryPrice").asText("0")))
+                        .unrealizedPnl(new BigDecimal(p.path("unRealizedProfit").asText("0")))
+                        .build());
+                }
+            }
+            log.info("[BINANCE] Fetched {} open positions", positions.size());
+            return positions;
+        } catch (Exception e) {
+            log.error("[BINANCE] Failed to fetch positions: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     // --- Helpers ---
 
     private String resolveBase(String baseUrl) {

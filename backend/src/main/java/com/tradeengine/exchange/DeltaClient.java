@@ -274,6 +274,44 @@ public class DeltaClient implements ExchangeClient {
         return testnetBaseUrl;
     }
 
+    @Override
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v2/positions";
+            long timestamp = System.currentTimeMillis() / 1000;
+
+            String signature = sign("GET" + timestamp + path, secret);
+            String responseBody = getSigned(base + path, apiKey, String.valueOf(timestamp), signature);
+            JsonNode root = mapper.readTree(responseBody);
+
+            validateResponse(root);
+            JsonNode resultArray = root.get("result");
+
+            List<ExchangePosition> positions = new ArrayList<>();
+            if (resultArray != null && resultArray.isArray()) {
+                for (JsonNode p : resultArray) {
+                    BigDecimal size = new BigDecimal(p.path("size").asText("0"));
+                    if (size.abs().compareTo(BigDecimal.ZERO) == 0) continue;
+
+                    positions.add(ExchangePosition.builder()
+                        .exchange("DELTA")
+                        .symbol(p.path("product_symbol").asText())
+                        .side(size.compareTo(BigDecimal.ZERO) > 0 ? "LONG" : "SHORT")
+                        .size(size.abs())
+                        .entryPrice(new BigDecimal(p.path("entry_price").asText("0")))
+                        .unrealizedPnl(new BigDecimal(p.path("pnl").asText("0")))
+                        .build());
+                }
+            }
+            log.info("[DELTA] Fetched {} open positions", positions.size());
+            return positions;
+        } catch (Exception e) {
+            log.error("[DELTA] Failed to fetch positions: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     // --- Helpers ---
 
     private String resolveBase(String baseUrl) {
