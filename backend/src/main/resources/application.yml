@@ -62,6 +62,26 @@ symbols:
       binance: DOGEUSDT
       delta: DOGEUSD
       bybit: DOGEUSDT
+    "AVAX/USDT":
+      binance: AVAXUSDT
+      delta: AVAXUSD
+      bybit: AVAXUSDT
+    "LINK/USDT":
+      binance: LINKUSDT
+      delta: LINKUSD
+      bybit: LINKUSDT
+    "MATIC/USDT":
+      binance: MATICUSDT
+      delta: MATICUSD
+      bybit: MATICUSDT
+    "ADA/USDT":
+      binance: ADAUSDT
+      delta: ADAUSD
+      bybit: ADAUSDT
+    "DOT/USDT":
+      binance: DOTUSDT
+      delta: DOTUSD
+      bybit: DOTUSDT
 
 logging:
   level:
