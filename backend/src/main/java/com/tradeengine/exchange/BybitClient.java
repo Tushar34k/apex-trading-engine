@@ -264,6 +264,46 @@ public class BybitClient implements ExchangeClient {
         return testnetBaseUrl;
     }
 
+    @Override
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v5/position/list";
+            String queryString = "category=linear&settleCoin=USDT";
+            long timestamp = System.currentTimeMillis();
+
+            String signature = sign(timestamp, apiKey, queryString, secret);
+            String responseBody = getSigned(base + path + "?" + queryString,
+                apiKey, timestamp, signature);
+            JsonNode root = mapper.readTree(responseBody);
+
+            validateResponse(root);
+            JsonNode list = root.path("result").path("list");
+
+            List<ExchangePosition> positions = new ArrayList<>();
+            if (list.isArray()) {
+                for (JsonNode p : list) {
+                    BigDecimal size = new BigDecimal(p.path("size").asText("0"));
+                    if (size.compareTo(BigDecimal.ZERO) == 0) continue;
+
+                    positions.add(ExchangePosition.builder()
+                        .exchange("BYBIT")
+                        .symbol(p.path("symbol").asText())
+                        .side(p.path("side").asText("Buy").equalsIgnoreCase("Buy") ? "LONG" : "SHORT")
+                        .size(size)
+                        .entryPrice(new BigDecimal(p.path("avgPrice").asText("0")))
+                        .unrealizedPnl(new BigDecimal(p.path("unrealisedPnl").asText("0")))
+                        .build());
+                }
+            }
+            log.info("[BYBIT] Fetched {} open positions", positions.size());
+            return positions;
+        } catch (Exception e) {
+            log.error("[BYBIT] Failed to fetch positions: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     // --- HMAC-SHA256 Signing (Bybit V5) ---
 
     /**
