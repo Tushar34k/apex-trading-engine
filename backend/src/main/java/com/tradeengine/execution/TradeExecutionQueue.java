@@ -287,6 +287,18 @@ public class TradeExecutionQueue {
             .build();
     }
 
+    // --- Cleanup ---
+    private void cleanupExpiredRequests() {
+        long now = System.currentTimeMillis();
+        requestTimestamps.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() > REQUEST_EXPIRY_MS) {
+                processedRequests.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
+    }
+
     // --- Metrics ---
     public int getQueueSize() { return queue.size(); }
     public int getQueueCapacity() { return QUEUE_CAPACITY; }
