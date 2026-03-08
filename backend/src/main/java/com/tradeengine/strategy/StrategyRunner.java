@@ -171,7 +171,7 @@ public class StrategyRunner {
                     if (currentPrice.compareTo(tpPrice) >= 0) {
                         log.info("Bot {} TAKE-PROFIT triggered: price {} >= TP {}", bot.getId(), currentPrice, tpPrice);
                         submitSell(bot, decryptedKey, decryptedSecret, currentPrice,
-                            "Take-profit triggered at " + tpPct + "%", exchangeBaseUrl, symbolInfo, "BOT_TP", exchangeName);
+                            "Take-profit triggered at " + tpPct + "%", exchangeBaseUrl, symbolInfo, "BOT_TP", exchangeName, exchangeSymbol);
                         return;
                     }
                 }
