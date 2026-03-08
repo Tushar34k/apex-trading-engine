@@ -227,13 +227,13 @@ public class StrategyRunner {
     private void submitBuy(TradingBot bot, String apiKey, String secret,
                            TradingStrategy.SignalResult signal, String exchangeBaseUrl,
                            SymbolInfo symbolInfo, Map<String, Object> params,
-                           String exchangeName, ExchangeClient exchangeClient) {
+                           String exchangeName, ExchangeClient exchangeClient, String exchangeSymbol) {
         if (killSwitch.isActive()) {
             log.warn("Bot {} BUY blocked — kill switch active", bot.getId());
             return;
         }
 
-        log.info("Executing trade on exchange: {} for botId={}", exchangeName, bot.getId());
+        log.info("Executing trade on exchange: {} for botId={} symbol={}", exchangeName, bot.getId(), exchangeSymbol);
 
         var balanceList = exchangeClient.getBalances(apiKey, secret, exchangeBaseUrl);
         BigDecimal usdtBalance = balanceList.stream()
@@ -270,12 +270,12 @@ public class StrategyRunner {
         }
 
         log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue via {}",
-            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, exchangeName);
+            bot.getId(), bot.getName(), quantity, exchangeSymbol, currentPrice, exchangeName);
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
             .userId(bot.getUserId())
-            .symbol(bot.getSymbol())
+            .symbol(exchangeSymbol)
             .side("BUY")
             .quantity(quantity)
             .orderType("MARKET")
