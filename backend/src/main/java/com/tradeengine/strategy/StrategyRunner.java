@@ -317,7 +317,7 @@ public class StrategyRunner {
     private void submitSell(TradingBot bot, String apiKey, String secret,
                             BigDecimal currentPrice, String reason,
                             String exchangeBaseUrl, SymbolInfo symbolInfo,
-                            String notificationType, String exchangeName) {
+                            String notificationType, String exchangeName, String exchangeSymbol) {
         if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
 
         if (killSwitch.isActive() && "BOT_SELL".equals(notificationType)) {
@@ -335,12 +335,12 @@ public class StrategyRunner {
         }
 
         log.info("Bot {} [{}]: Submitting SELL {} {} @ ~{} ({}) to execution queue via {}",
-            bot.getId(), bot.getName(), quantity, bot.getSymbol(), currentPrice, notificationType, exchangeName);
+            bot.getId(), bot.getName(), quantity, exchangeSymbol, currentPrice, notificationType, exchangeName);
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
             .userId(bot.getUserId())
-            .symbol(bot.getSymbol())
+            .symbol(exchangeSymbol)
             .side("SELL")
             .quantity(quantity)
             .orderType("MARKET")
