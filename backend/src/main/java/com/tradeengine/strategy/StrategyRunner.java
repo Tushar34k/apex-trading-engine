@@ -39,7 +39,8 @@ public class StrategyRunner {
     private final OrderRepository orderRepo;
     private final PositionRepository positionRepo;
     private final ExchangeFactory exchangeFactory;
-    private final SymbolInfoCache symbolInfoCache;
+    private final ExchangeSymbolRegistry symbolRegistry;
+    private final SymbolMapperService symbolMapper;
     private final TradeEventPublisher publisher;
     private final ObjectMapper objectMapper;
     private final RiskManagementService riskService;
