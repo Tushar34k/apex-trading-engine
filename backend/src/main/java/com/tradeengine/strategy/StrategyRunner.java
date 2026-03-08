@@ -212,11 +212,11 @@ public class StrategyRunner {
             }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
-                submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient);
+                submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient, exchangeSymbol);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
                     BigDecimal.valueOf(signal.price()), signal.reason(),
-                    exchangeBaseUrl, symbolInfo, "BOT_SELL", exchangeName);
+                    exchangeBaseUrl, symbolInfo, "BOT_SELL", exchangeName, exchangeSymbol);
             }
         } finally {
             bot.setProcessing(false);
