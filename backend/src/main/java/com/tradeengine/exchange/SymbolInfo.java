@@ -4,11 +4,13 @@ import lombok.Data;
 import java.math.BigDecimal;
 
 /**
- * Binance symbol trading rules extracted from exchangeInfo.
+ * Exchange symbol trading rules (LOT_SIZE, MIN_NOTIONAL, PRICE_FILTER).
+ * Exchange-agnostic — the exchange field identifies the source.
  */
 @Data
 public class SymbolInfo {
     private String symbol;
+    private String exchange;    // BINANCE, DELTA, BYBIT
     private BigDecimal stepSize;      // LOT_SIZE stepSize
     private BigDecimal minQty;        // LOT_SIZE minQty
     private BigDecimal maxQty;        // LOT_SIZE maxQty

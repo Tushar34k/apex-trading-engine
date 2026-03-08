@@ -121,7 +121,11 @@ public class StrategyRunner {
             String decryptedSecret = apiKeyService.decryptApiSecret(apiKey);
             String exchangeBaseUrl = resolveExchangeUrl(bot.getExchangeMode(), exchangeClient);
 
-            SymbolInfo symbolInfo = symbolInfoCache.getOrFetch(bot.getSymbol(), exchangeBaseUrl);
+            // Resolve exchange-native symbol from universal format
+            String exchangeSymbol = symbolMapper.resolveSymbol(exchangeName, bot.getSymbol());
+            log.debug("Bot {} symbol resolved: {} → {} ({})", bot.getId(), bot.getSymbol(), exchangeSymbol, exchangeName);
+
+            SymbolInfo symbolInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
             Map<String, Object> params = parseStrategyParams(bot);
 
             // --- SL/TP/Trailing checks for open positions ---

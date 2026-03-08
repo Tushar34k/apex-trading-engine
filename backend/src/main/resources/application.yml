@@ -40,6 +40,29 @@ server:
 live-trading:
   enabled: ${LIVE_TRADING_ENABLED:false}
 
+symbols:
+  mappings:
+    "BTC/USDT":
+      binance: BTCUSDT
+      delta: BTCUSD
+      bybit: BTCUSDT
+    "ETH/USDT":
+      binance: ETHUSDT
+      delta: ETHUSD
+      bybit: ETHUSDT
+    "SOL/USDT":
+      binance: SOLUSDT
+      delta: SOLUSD
+      bybit: SOLUSDT
+    "XRP/USDT":
+      binance: XRPUSDT
+      delta: XRPUSD
+      bybit: XRPUSDT
+    "DOGE/USDT":
+      binance: DOGEUSDT
+      delta: DOGEUSD
+      bybit: DOGEUSDT
+
 logging:
   level:
     com.tradeengine: INFO
