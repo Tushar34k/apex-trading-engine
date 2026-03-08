@@ -47,4 +47,12 @@ public interface ExchangeClient {
      * @return the appropriate API base URL for this exchange
      */
     String resolveBaseUrl(String mode);
+
+    /**
+     * Fetch all open positions from the exchange.
+     * Only returns positions with size > 0.
+     *
+     * @return list of open positions, never null
+     */
+    List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl);
 }
