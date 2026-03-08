@@ -47,9 +47,8 @@ public class SystemMetricsController {
         m.put("totalBots", botRepo.count());
         m.put("runningBots", botRepo.findByStatus("RUNNING").size());
 
-        // Positions
-        long openPositions = positionRepo.findAll().stream()
-            .filter(p -> "OPEN".equals(p.getStatus())).count();
+        // Positions — use count query instead of findAll()
+        long openPositions = positionRepo.countByStatus("OPEN");
         m.put("openPositions", openPositions);
 
         // Kill switch
