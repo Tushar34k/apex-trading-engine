@@ -64,23 +64,20 @@ public class TradeEventPublisher {
         log.info("Published TRADE_OPENED for user {}", userId);
     }
 
-    public void publishPositionClosed(String userId, TradePosition position, BigDecimal pnl) {
-        var event = Map.of(
-            "type", "TRADE_CLOSED",
-            "trade", Map.of(
-                "id", position.getId(),
-                "symbol", position.getSymbol(),
-                "side", position.getSide(),
-                "entryPrice", position.getEntryPrice(),
-                "exitPrice", position.getExitPrice(),
-                "quantity", position.getQuantity(),
-                "pnl", pnl,
-                "status", "CLOSED",
-                "openedAt", position.getOpenedAt().toString(),
-                "closedAt", position.getClosedAt().toString(),
-                "strategyName", "EMA Crossover",
-                "strategyVersion", "v1.0"
-            )
+  public void publishPositionClosed(String userId, TradePosition position, BigDecimal pnl) {
+        Map<String, Object> trade = new HashMap<>();
+        trade.put("id", position.getId());
+        trade.put("symbol", position.getSymbol());
+        trade.put("side", position.getSide());
+        trade.put("entryPrice", position.getEntryPrice());
+        trade.put("exitPrice", position.getExitPrice());
+        trade.put("quantity", position.getQuantity());
+        trade.put("pnl", pnl);
+        trade.put("status", "CLOSED");
+
+        Map<String, Object> event = Map.of(
+                "type", "TRADE_CLOSED",
+                "trade", trade
         );
         messaging.convertAndSendToUser(userId, "/topic/trades", event);
         log.info("Published TRADE_CLOSED for user {} with PnL {}", userId, pnl);
