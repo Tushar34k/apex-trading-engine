@@ -5,12 +5,17 @@ spring:
     password: ${DB_PASSWORD:postgres}
     hikari:
       maximum-pool-size: 10
+
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     open-in-view: false
+
   flyway:
     enabled: true
+
+server:
+  port: ${PORT:8080}
 
 jwt:
   secret: ${JWT_SECRET:change-me-in-production-min-256-bits-long-secret-key}
@@ -25,17 +30,16 @@ exchange:
     live-url: ${BINANCE_LIVE_URL:https://api.binance.com}
     testnet-url: ${BINANCE_TESTNET_URL:https://testnet.binance.vision}
     recv-window: 5000
+
   delta:
     base-url: ${DELTA_BASE_URL:https://cdn-ind.testnet.deltaex.org}
     live-url: ${DELTA_LIVE_URL:https://api.delta.exchange}
     testnet-url: ${DELTA_TESTNET_URL:https://cdn-ind.testnet.deltaex.org}
+
   bybit:
     base-url: ${BYBIT_BASE_URL:https://api-testnet.bybit.com}
     live-url: ${BYBIT_LIVE_URL:https://api.bybit.com}
     testnet-url: ${BYBIT_TESTNET_URL:https://api-testnet.bybit.com}
-
-server:
-  port: 8080
 
 live-trading:
   enabled: ${LIVE_TRADING_ENABLED:false}
