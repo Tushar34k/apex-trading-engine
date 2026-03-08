@@ -39,8 +39,10 @@ public class TradeExecutionQueue {
     // Per-bot pending trade protection
     private final ConcurrentHashMap<UUID, Boolean> pendingTrades = new ConcurrentHashMap<>();
 
-    // Request-level duplicate protection
+    // Request-level duplicate protection (bounded: entries expire after processing)
     private final Set<UUID> processedRequests = ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<UUID, Long> requestTimestamps = new ConcurrentHashMap<>();
+    private static final long REQUEST_EXPIRY_MS = 300_000; // 5 minutes
 
     private final AtomicLong totalSubmitted = new AtomicLong();
     private final AtomicLong totalExecuted = new AtomicLong();
