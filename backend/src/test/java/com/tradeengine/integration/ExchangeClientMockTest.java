@@ -65,16 +65,15 @@ class ExchangeClientMockTest {
     }
 
     @Test
-    @DisplayName("BinanceClient: getBalances parses account info")
+    @DisplayName("BinanceClient: getBalances parses futures balance response")
     void binanceGetBalances() {
+        // Futures /fapi/v2/balance returns an array, not an object with "balances" key
         String body = """
-            {
-              "balances": [
-                {"asset":"USDT","free":"1000.00","locked":"50.00"},
-                {"asset":"BTC","free":"0.5","locked":"0.0"},
-                {"asset":"ETH","free":"0.0","locked":"0.0"}
-              ]
-            }
+            [
+              {"asset":"USDT","balance":"1050.00","availableBalance":"1000.00"},
+              {"asset":"BTC","balance":"0.5","availableBalance":"0.5"},
+              {"asset":"ETH","balance":"0.0","availableBalance":"0.0"}
+            ]
             """;
         mockServer.enqueue(new MockResponse()
             .setBody(body)
@@ -84,10 +83,39 @@ class ExchangeClientMockTest {
         List<Balance> balances = client.getBalances("key", "secret", baseUrl);
 
         // Should filter out zero-balance assets
-        assertTrue(balances.size() >= 2);
+        assertEquals(2, balances.size());
         Balance usdt = balances.stream().filter(b -> "USDT".equals(b.getAsset())).findFirst().orElseThrow();
         assertEquals(new BigDecimal("1000.00"), usdt.getFree());
         assertEquals(new BigDecimal("50.00"), usdt.getLocked());
+    }
+
+    @Test
+    @DisplayName("BinanceClient: testConnection returns true on valid response")
+    void binanceTestConnection() {
+        String body = """
+            [{"asset":"USDT","balance":"100.00","availableBalance":"100.00"}]
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        assertTrue(client.testConnection("key", "secret", baseUrl));
+    }
+
+    @Test
+    @DisplayName("BinanceClient: testConnection returns false on API error")
+    void binanceTestConnectionFailure() {
+        String body = """
+            {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setResponseCode(403)
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        assertFalse(client.testConnection("badkey", "badsecret", baseUrl));
     }
 
     @Test
