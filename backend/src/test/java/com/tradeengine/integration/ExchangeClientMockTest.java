@@ -119,7 +119,7 @@ class ExchangeClientMockTest {
     }
 
     @Test
-    @DisplayName("BinanceClient: placeMarketOrder parses response")
+    @DisplayName("BinanceClient: placeMarketOrder parses futures response")
     void binancePlaceMarketOrder() {
         String body = """
             {
@@ -128,7 +128,7 @@ class ExchangeClientMockTest {
               "side": "BUY",
               "status": "FILLED",
               "executedQty": "0.001",
-              "cummulativeQuoteQty": "42.50"
+              "avgPrice": "42500.00"
             }
             """;
         mockServer.enqueue(new MockResponse()
@@ -143,6 +143,7 @@ class ExchangeClientMockTest {
         assertEquals("BTCUSDT", resp.getSymbol());
         assertEquals("BUY", resp.getSide());
         assertEquals(new BigDecimal("0.001"), resp.getExecutedQty());
+        assertEquals(new BigDecimal("42500.00"), resp.getAvgPrice());
     }
 
     @Test
