@@ -112,6 +112,8 @@ public class ExchangeSymbolRegistry {
                     case "NOTIONAL", "MIN_NOTIONAL" -> {
                         if (f.has("minNotional")) {
                             info.setMinNotional(new BigDecimal(f.get("minNotional").asText()));
+                        } else if (f.has("notional")) {
+                            info.setMinNotional(new BigDecimal(f.get("notional").asText()));
                         }
                     }
                     case "PRICE_FILTER" -> {
