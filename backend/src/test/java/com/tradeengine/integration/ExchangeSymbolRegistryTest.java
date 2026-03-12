@@ -35,15 +35,15 @@ class ExchangeSymbolRegistryTest {
     }
 
     @Test
-    @DisplayName("Binance: parses exchangeInfo with LOT_SIZE and MIN_NOTIONAL")
+    @DisplayName("Binance Futures: parses /fapi/v1/exchangeInfo with LOT_SIZE and MIN_NOTIONAL")
     void binanceSymbolInfo() {
         String body = """
             {"symbols":[{
               "symbol":"BTCUSDT",
               "filters":[
-                {"filterType":"LOT_SIZE","stepSize":"0.00001","minQty":"0.00001","maxQty":"9000"},
-                {"filterType":"NOTIONAL","minNotional":"10.00"},
-                {"filterType":"PRICE_FILTER","tickSize":"0.01"}
+                {"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},
+                {"filterType":"MIN_NOTIONAL","notional":"5"},
+                {"filterType":"PRICE_FILTER","tickSize":"0.10"}
               ]
             }]}
             """;
@@ -55,7 +55,14 @@ class ExchangeSymbolRegistryTest {
         assertEquals("BTCUSDT", info.getSymbol());
         assertEquals("BINANCE", info.getExchange());
         assertNotNull(info.getStepSize());
-        assertNotNull(info.getMinNotional());
+        // Verify the request hit the Futures endpoint
+        try {
+            var request = mockServer.takeRequest();
+            assertTrue(request.getPath().startsWith("/fapi/v1/exchangeInfo"),
+                "Should use Futures endpoint /fapi/v1/exchangeInfo but got: " + request.getPath());
+        } catch (Exception e) {
+            fail("Failed to verify request path: " + e.getMessage());
+        }
     }
 
     @Test

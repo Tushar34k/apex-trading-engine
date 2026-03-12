@@ -49,6 +49,7 @@ public class BinanceClient implements ExchangeClient {
 
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
 
     private final ObjectMapper mapper = new ObjectMapper();

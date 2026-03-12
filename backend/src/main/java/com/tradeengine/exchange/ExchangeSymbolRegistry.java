@@ -34,6 +34,7 @@ public class ExchangeSymbolRegistry {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
 
     private String cacheKey(String exchange, String symbol) {
@@ -73,7 +74,7 @@ public class ExchangeSymbolRegistry {
 
     private void fetchBinanceSymbolInfo(String symbol, String baseUrl) {
         try {
-            String url = baseUrl + "/api/v3/exchangeInfo?symbol=" + symbol.toUpperCase();
+            String url = baseUrl + "/fapi/v1/exchangeInfo?symbol=" + symbol.toUpperCase();
             var req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
             var resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {
@@ -111,6 +112,8 @@ public class ExchangeSymbolRegistry {
                     case "NOTIONAL", "MIN_NOTIONAL" -> {
                         if (f.has("minNotional")) {
                             info.setMinNotional(new BigDecimal(f.get("minNotional").asText()));
+                        } else if (f.has("notional")) {
+                            info.setMinNotional(new BigDecimal(f.get("notional").asText()));
                         }
                     }
                     case "PRICE_FILTER" -> {
