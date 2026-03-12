@@ -74,7 +74,7 @@ public class ExchangeSymbolRegistry {
 
     private void fetchBinanceSymbolInfo(String symbol, String baseUrl) {
         try {
-            String url = baseUrl + "/api/v3/exchangeInfo?symbol=" + symbol.toUpperCase();
+            String url = baseUrl + "/fapi/v1/exchangeInfo?symbol=" + symbol.toUpperCase();
             var req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
             var resp = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) {

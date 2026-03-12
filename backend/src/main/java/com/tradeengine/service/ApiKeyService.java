@@ -53,8 +53,7 @@ public class ApiKeyService {
         if (decrypted.isEmpty()) {
             throw new RuntimeException("Decrypted API key is empty for keyId=" + key.getId());
         }
-        log.debug("[API_KEY] Decrypted key for {}: prefix={}, length={}",
-            key.getLabel(), decrypted.substring(0, Math.min(4, decrypted.length())), decrypted.length());
+        logKeyDetails("API_KEY", key.getLabel(), decrypted);
         return decrypted;
     }
 
@@ -63,7 +62,15 @@ public class ApiKeyService {
         if (decrypted.isEmpty()) {
             throw new RuntimeException("Decrypted API secret is empty for keyId=" + key.getId());
         }
+        logKeyDetails("API_SECRET", key.getLabel(), decrypted);
         return decrypted;
+    }
+
+    private void logKeyDetails(String keyName, String label, String value) {
+        String prefix = value.substring(0, Math.min(4, value.length()));
+        String suffix = value.length() > 4 ? value.substring(value.length() - 4) : "****";
+        log.debug("[{}] {} for '{}': length={}, prefix={}, suffix={}",
+            keyName, keyName, label, value.length(), prefix, suffix);
     }
 
     private String encrypt(String plaintext) {

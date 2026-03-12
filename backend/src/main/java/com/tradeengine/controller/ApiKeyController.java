@@ -87,7 +87,9 @@ public class ApiKeyController {
             String decryptedSecret = apiKeyService.decryptApiSecret(key);
 
             ExchangeClient client = exchangeFactory.getClient(key.getExchange());
-            var balances = client.getBalances(decryptedKey, decryptedSecret, null);
+            String baseUrl = client.resolveBaseUrl("TESTNET");
+            log.info("[API_KEY_TEST] Testing {} key={} against {}", key.getExchange(), id, baseUrl);
+            var balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
             return ResponseEntity.ok(Map.of("valid", true,
                 "message", "Connected to " + key.getExchange() + ". Found " + balances.size() + " assets."));
         } catch (UnsupportedOperationException e) {
