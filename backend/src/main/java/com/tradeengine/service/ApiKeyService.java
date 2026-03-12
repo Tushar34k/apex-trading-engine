@@ -3,6 +3,7 @@ package com.tradeengine.service;
 import com.tradeengine.model.UserApiKey;
 import com.tradeengine.repository.ApiKeyRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ApiKeyService {
 
     private final ApiKeyRepository repo;
@@ -47,11 +49,21 @@ public class ApiKeyService {
     }
 
     public String decryptApiKey(UserApiKey key) {
-        return decrypt(key.getApiKeyEncrypted());
+        String decrypted = decrypt(key.getApiKeyEncrypted()).trim();
+        if (decrypted.isEmpty()) {
+            throw new RuntimeException("Decrypted API key is empty for keyId=" + key.getId());
+        }
+        log.debug("[API_KEY] Decrypted key for {}: prefix={}, length={}",
+            key.getLabel(), decrypted.substring(0, Math.min(4, decrypted.length())), decrypted.length());
+        return decrypted;
     }
 
     public String decryptApiSecret(UserApiKey key) {
-        return decrypt(key.getApiSecretEncrypted());
+        String decrypted = decrypt(key.getApiSecretEncrypted()).trim();
+        if (decrypted.isEmpty()) {
+            throw new RuntimeException("Decrypted API secret is empty for keyId=" + key.getId());
+        }
+        return decrypted;
     }
 
     private String encrypt(String plaintext) {
