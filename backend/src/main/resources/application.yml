@@ -26,9 +26,9 @@ encryption:
 
 exchange:
   binance:
-    base-url: ${BINANCE_BASE_URL:https://testnet.binance.vision}
-    live-url: ${BINANCE_LIVE_URL:https://api.binance.com}
-    testnet-url: ${BINANCE_TESTNET_URL:https://testnet.binance.vision}
+    base-url: ${BINANCE_BASE_URL:https://testnet.binancefuture.com}
+    live-url: ${BINANCE_LIVE_URL:https://fapi.binance.com}
+    testnet-url: ${BINANCE_TESTNET_URL:https://testnet.binancefuture.com}
     recv-window: 5000
 
   delta:
