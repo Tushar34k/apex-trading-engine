@@ -34,6 +34,7 @@ public class ExchangeSymbolRegistry {
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
+        .followRedirects(HttpClient.Redirect.NORMAL)
         .build();
 
     private String cacheKey(String exchange, String symbol) {
