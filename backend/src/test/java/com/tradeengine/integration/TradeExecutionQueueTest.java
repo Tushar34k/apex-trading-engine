@@ -5,6 +5,7 @@ import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
+import com.tradeengine.service.OrderNormalizerService;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
 
