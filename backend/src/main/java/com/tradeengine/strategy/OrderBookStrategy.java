@@ -14,7 +14,7 @@ import java.util.Map;
  *
  * Note: This strategy uses closing prices as a proxy when order book data
  * is not available. In production, it reads bid/ask volumes from
- * BinanceStreamClient's depth cache.
+ * the MarketDataStreamService's depth cache (exchange-agnostic).
  */
 public class OrderBookStrategy implements TradingStrategy {
 
