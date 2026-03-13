@@ -5,6 +5,7 @@ import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.exchange.OrderResponse;
 import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
+import com.tradeengine.service.OrderNormalizerService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
