@@ -46,7 +46,7 @@ public class StrategyRunner {
     private final RiskManagementService riskService;
     private final TrailingStopService trailingStopService;
     private final NotificationService notificationService;
-    private final BinanceStreamClient streamClient;
+    private final MarketDataStreamService streamService;
     private final TradeExecutionQueue executionQueue;
     private final KillSwitchService killSwitch;
     private final SignalDebounceService debounceService;
