@@ -130,7 +130,7 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                Double freshPrice = streamClient.getFreshPrice(exchangeSymbol);
+                Double freshPrice = streamService.getFreshPrice(exchangeName, exchangeSymbol);
                 BigDecimal currentPrice;
                 if (freshPrice != null) {
                     currentPrice = BigDecimal.valueOf(freshPrice);
