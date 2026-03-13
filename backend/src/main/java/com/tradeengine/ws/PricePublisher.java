@@ -1,6 +1,8 @@
 package com.tradeengine.ws;
 
 import com.tradeengine.model.TradingBot;
+import com.tradeengine.model.UserApiKey;
+import com.tradeengine.repository.ApiKeyRepository;
 import com.tradeengine.repository.BotRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,41 +12,41 @@ import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
- * Manages Binance WebSocket subscriptions for running bots.
+ * Manages market data stream subscriptions for running bots.
  * Publishes price updates to frontend via STOMP.
- * Refreshes subscriptions every 10 seconds based on active bots.
+ * Exchange-agnostic: delegates to MarketDataStreamService.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class PricePublisher {
 
-    private final BinanceStreamClient streamClient;
+    private final MarketDataStreamService streamService;
     private final TradeEventPublisher publisher;
     private final BotRepository botRepo;
+    private final ApiKeyRepository apiKeyRepo;
 
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
-    private final Set<String> activeSymbols = new HashSet<>();
+    // Tracks active subscriptions as "EXCHANGE:SYMBOL"
+    private final Set<String> activeSubscriptions = new HashSet<>();
 
     @PostConstruct
     public void init() {
         // Forward price updates to STOMP for frontend
-        streamClient.setPriceUpdateListener((symbol, price) -> {
+        streamService.setPriceUpdateListener((symbol, price) -> {
             publisher.publishPriceUpdate(symbol, BigDecimal.valueOf(price), 0);
         });
 
-        // Always subscribe to major pairs
-        streamClient.subscribe("BTCUSDT", true);
-        streamClient.subscribe("ETHUSDT", true);
-        activeSymbols.add("BTCUSDT");
-        activeSymbols.add("ETHUSDT");
+        // Default subscriptions for dashboard (Binance streams available)
+        streamService.subscribe("BINANCE", "BTCUSDT", true);
+        streamService.subscribe("BINANCE", "ETHUSDT", true);
+        activeSubscriptions.add("BINANCE:BTCUSDT");
+        activeSubscriptions.add("BINANCE:ETHUSDT");
     }
 
     /**
@@ -54,33 +56,45 @@ public class PricePublisher {
     public void syncSubscriptions() {
         List<TradingBot> runningBots = botRepo.findByStatus("RUNNING");
 
-        Set<String> neededSymbols = new HashSet<>();
-        neededSymbols.add("BTCUSDT");
-        neededSymbols.add("ETHUSDT");
+        Set<String> neededSubscriptions = new HashSet<>();
+        neededSubscriptions.add("BINANCE:BTCUSDT");
+        neededSubscriptions.add("BINANCE:ETHUSDT");
 
         for (TradingBot bot : runningBots) {
-            neededSymbols.add(bot.getSymbol().toUpperCase());
+            // Resolve exchange from API key
+            String exchange = "BINANCE"; // default
+            try {
+                Optional<UserApiKey> apiKey = apiKeyRepo.findById(bot.getApiKeyId());
+                if (apiKey.isPresent()) {
+                    exchange = apiKey.get().getExchange().toUpperCase();
+                }
+            } catch (Exception e) {
+                log.debug("[PricePublisher] Could not resolve exchange for bot {}", bot.getId());
+            }
+            neededSubscriptions.add(exchange + ":" + bot.getSymbol().toUpperCase());
         }
 
         // Subscribe to new symbols
-        for (String symbol : neededSymbols) {
-            if (!activeSymbols.contains(symbol)) {
+        for (String sub : neededSubscriptions) {
+            if (!activeSubscriptions.contains(sub)) {
+                String[] parts = sub.split(":", 2);
                 boolean testnet = !liveTradingEnabled;
-                streamClient.subscribe(symbol, testnet);
-                activeSymbols.add(symbol);
-                log.info("[PricePublisher] Added stream for {}", symbol);
+                streamService.subscribe(parts[0], parts[1], testnet);
+                activeSubscriptions.add(sub);
+                log.info("[PricePublisher] Added stream for {} on {}", parts[1], parts[0]);
             }
         }
 
-        // Unsubscribe from symbols no longer needed (except defaults)
+        // Unsubscribe from symbols no longer needed
         Set<String> toRemove = new HashSet<>();
-        for (String symbol : activeSymbols) {
-            if (!neededSymbols.contains(symbol)) {
-                streamClient.unsubscribe(symbol);
-                toRemove.add(symbol);
-                log.info("[PricePublisher] Removed stream for {}", symbol);
+        for (String sub : activeSubscriptions) {
+            if (!neededSubscriptions.contains(sub)) {
+                String[] parts = sub.split(":", 2);
+                streamService.unsubscribe(parts[0], parts[1]);
+                toRemove.add(sub);
+                log.info("[PricePublisher] Removed stream for {} on {}", parts[1], parts[0]);
             }
         }
-        activeSymbols.removeAll(toRemove);
+        activeSubscriptions.removeAll(toRemove);
     }
 }

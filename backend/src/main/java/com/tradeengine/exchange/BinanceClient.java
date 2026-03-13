@@ -318,6 +318,7 @@ public class BinanceClient implements ExchangeClient {
      * Fetch open orders for a symbol.
      * Endpoint: GET /fapi/v1/openOrders
      */
+    @Override
     public List<JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl) {
         String base = resolveBase(baseUrl);
         String endpoint = "/fapi/v1/openOrders";
@@ -396,6 +397,7 @@ public class BinanceClient implements ExchangeClient {
      * Test connectivity by calling GET /fapi/v2/balance.
      * Returns true if the API key is valid and can authenticate.
      */
+    @Override
     public boolean testConnection(String apiKey, String secret, String baseUrl) {
         String base = resolveBase(baseUrl);
         String endpoint = "/fapi/v2/balance";
@@ -415,7 +417,6 @@ public class BinanceClient implements ExchangeClient {
             String body = get(url, apiKey);
             JsonNode node = mapper.readTree(body);
 
-            // If the response is an error object with a code, connection failed
             if (node.has("code") && node.get("code").asInt() < 0) {
                 log.error("[BINANCE] Connection test failed: code={} msg={}",
                     node.get("code").asInt(), node.path("msg").asText());
@@ -427,6 +428,52 @@ public class BinanceClient implements ExchangeClient {
         } catch (Exception e) {
             log.error("[BINANCE] Connection test failed: {}", e.getMessage());
             return false;
+        }
+    }
+
+    @Override
+    public OrderResponse cancelOrder(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        String base = resolveBase(baseUrl);
+        String endpoint = "/fapi/v1/order";
+
+        long timestamp = System.currentTimeMillis();
+        String params = buildQueryString(
+            "symbol", symbol,
+            "orderId", orderId,
+            "recvWindow", String.valueOf(recvWindow),
+            "timestamp", String.valueOf(timestamp)
+        );
+
+        String signed = appendSignature(params, secret);
+        String url = base + endpoint + "?" + signed;
+
+        log.info("[BINANCE] DELETE {} symbol={} orderId={}", endpoint, symbol, orderId);
+
+        try {
+            var req = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("X-MBX-APIKEY", apiKey)
+                .timeout(Duration.ofSeconds(10))
+                .method("DELETE", HttpRequest.BodyPublishers.noBody())
+                .build();
+
+            var resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                log.error("[BINANCE] HTTP {} from DELETE {}: {}", resp.statusCode(), endpoint, resp.body());
+                parseBinanceError(resp.body(), resp.statusCode());
+            }
+
+            JsonNode node = parseAndValidate(resp.body());
+
+            return OrderResponse.builder()
+                .orderId(node.path("orderId").asText(orderId))
+                .symbol(node.path("symbol").asText(symbol))
+                .side(node.path("side").asText())
+                .status("CANCELLED")
+                .build();
+        } catch (Exception e) {
+            log.error("[BINANCE] cancelOrder failed: symbol={} orderId={} error={}", symbol, orderId, e.getMessage());
+            throw new RuntimeException("Binance cancel order failed: " + e.getMessage(), e);
         }
     }
 

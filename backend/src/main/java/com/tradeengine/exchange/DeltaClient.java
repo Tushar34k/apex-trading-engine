@@ -267,6 +267,88 @@ public class DeltaClient implements ExchangeClient {
     }
 
     @Override
+    public boolean testConnection(String apiKey, String secret, String baseUrl) {
+        try {
+            List<Balance> balances = getBalances(apiKey, secret, baseUrl);
+            log.info("[DELTA] Connection test successful — {} assets found", balances.size());
+            return true;
+        } catch (Exception e) {
+            log.error("[DELTA] Connection test failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public OrderResponse cancelOrder(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v2/orders/" + orderId;
+            long timestamp = System.currentTimeMillis() / 1000;
+
+            String signature = sign("DELETE" + timestamp + path, secret);
+
+            log.info("[DELTA] Cancelling order: symbol={} orderId={}", symbol, orderId);
+            String responseBody = deleteSigned(base + path, apiKey, String.valueOf(timestamp), signature);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+
+            return OrderResponse.builder()
+                .orderId(orderId)
+                .symbol(symbol)
+                .status("CANCELLED")
+                .build();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[DELTA] Cancel order failed: symbol={} orderId={} error={}", symbol, orderId, e.getMessage());
+            throw new RuntimeException("Delta cancel order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<com.fasterxml.jackson.databind.JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v2/orders?product_symbol=" + symbol + "&state=open";
+            long timestamp = System.currentTimeMillis() / 1000;
+
+            String signature = sign("GET" + timestamp + "/v2/orders", secret);
+            String responseBody = getSigned(base + path, apiKey, String.valueOf(timestamp), signature);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+
+            JsonNode resultArray = root.get("result");
+            List<JsonNode> orders = new ArrayList<>();
+            if (resultArray != null && resultArray.isArray()) {
+                for (JsonNode order : resultArray) {
+                    orders.add(order);
+                }
+            }
+            log.info("[DELTA] Fetched {} open orders for {}", orders.size(), symbol);
+            return orders;
+        } catch (Exception e) {
+            log.error("[DELTA] getOpenOrders failed: symbol={} error={}", symbol, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String deleteSigned(String url, String apiKey, String timestamp, String signature) throws Exception {
+        var req = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .method("DELETE", HttpRequest.BodyPublishers.noBody())
+            .header("api-key", apiKey)
+            .header("timestamp", timestamp)
+            .header("signature", signature)
+            .header("Content-Type", "application/json")
+            .build();
+        var resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+        if (resp.statusCode() != 200) {
+            throw new RuntimeException("Delta DELETE error " + resp.statusCode() + ": " + resp.body());
+        }
+        return resp.body();
+    }
+
+    @Override
     public String resolveBaseUrl(String mode) {
         if ("LIVE".equalsIgnoreCase(mode)) {
             return liveBaseUrl;

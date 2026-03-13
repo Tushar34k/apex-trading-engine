@@ -6,6 +6,7 @@ import java.util.List;
 /**
  * Generic exchange client interface.
  * All exchange implementations must implement this.
+ * The interface is exchange-agnostic — no Binance/Bybit/Delta-specific logic.
  */
 public interface ExchangeClient {
 
@@ -55,4 +56,24 @@ public interface ExchangeClient {
      * @return list of open positions, never null
      */
     List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl);
+
+    /**
+     * Test connectivity and API key validity.
+     * Calls a simple authenticated endpoint and returns true if successful.
+     */
+    boolean testConnection(String apiKey, String secret, String baseUrl);
+
+    /**
+     * Cancel an open order by orderId and symbol.
+     *
+     * @return the cancelled order response, or throws on failure
+     */
+    OrderResponse cancelOrder(String apiKey, String secret, String symbol, String orderId, String baseUrl);
+
+    /**
+     * Fetch open orders for a symbol.
+     *
+     * @return list of open order details as JSON nodes (exchange-specific format)
+     */
+    List<com.fasterxml.jackson.databind.JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl);
 }

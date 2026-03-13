@@ -12,7 +12,7 @@ import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
 import com.tradeengine.service.*;
-import com.tradeengine.ws.BinanceStreamClient;
+import com.tradeengine.ws.MarketDataStreamService;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,7 +46,7 @@ public class StrategyRunner {
     private final RiskManagementService riskService;
     private final TrailingStopService trailingStopService;
     private final NotificationService notificationService;
-    private final BinanceStreamClient streamClient;
+    private final MarketDataStreamService streamService;
     private final TradeExecutionQueue executionQueue;
     private final KillSwitchService killSwitch;
     private final SignalDebounceService debounceService;
@@ -130,7 +130,7 @@ public class StrategyRunner {
 
             // --- SL/TP/Trailing checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
-                Double freshPrice = streamClient.getFreshPrice(exchangeSymbol);
+                Double freshPrice = streamService.getFreshPrice(exchangeName, exchangeSymbol);
                 BigDecimal currentPrice;
                 if (freshPrice != null) {
                     currentPrice = BigDecimal.valueOf(freshPrice);
@@ -187,7 +187,7 @@ public class StrategyRunner {
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
 
             // Inject order book depth
-            double[] depth = streamClient.getDepth(exchangeSymbol);
+            double[] depth = streamService.getDepth(exchangeName, exchangeSymbol);
             if (depth != null) {
                 params.put("bidVolume", depth[0]);
                 params.put("askVolume", depth[1]);

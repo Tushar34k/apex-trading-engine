@@ -281,6 +281,103 @@ class ExchangeClientMockTest {
         assertEquals("BYBIT", positions.get(0).getExchange());
     }
 
+    // ─── Cancel Order Tests ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("BinanceClient: cancelOrder parses futures response")
+    void binanceCancelOrder() {
+        String body = """
+            {"orderId":12345,"symbol":"BTCUSDT","status":"CANCELED","side":"BUY"}
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        OrderResponse resp = client.cancelOrder("key", "secret", "BTCUSDT", "12345", baseUrl);
+        assertEquals("CANCELLED", resp.getStatus());
+        assertEquals("BTCUSDT", resp.getSymbol());
+    }
+
+    @Test
+    @DisplayName("BybitClient: cancelOrder parses V5 response")
+    void bybitCancelOrder() {
+        String body = """
+            {"retCode":0,"result":{"orderId":"12345","symbol":"BTCUSDT"}}
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BybitClient client = new BybitClient();
+        OrderResponse resp = client.cancelOrder("key", "secret", "BTCUSDT", "12345", baseUrl);
+        assertEquals("CANCELLED", resp.getStatus());
+    }
+
+    // ─── Open Orders Tests ──────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("BinanceClient: getOpenOrders returns order list")
+    void binanceGetOpenOrders() {
+        String body = """
+            [{"orderId":123,"symbol":"BTCUSDT","side":"BUY","status":"NEW","price":"50000","origQty":"0.01"}]
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        var orders = client.getOpenOrders("key", "secret", "BTCUSDT", baseUrl);
+        assertEquals(1, orders.size());
+        assertEquals("BTCUSDT", orders.get(0).get("symbol").asText());
+    }
+
+    @Test
+    @DisplayName("BybitClient: getOpenOrders returns V5 order list")
+    void bybitGetOpenOrders() {
+        String body = """
+            {"retCode":0,"result":{"list":[{"orderId":"123","symbol":"BTCUSDT","side":"Buy"}]}}
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BybitClient client = new BybitClient();
+        var orders = client.getOpenOrders("key", "secret", "BTCUSDT", baseUrl);
+        assertEquals(1, orders.size());
+    }
+
+    // ─── Test Connection Tests ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("BinanceClient: testConnection returns true on valid response")
+    void binanceTestConnectionViaInterface() {
+        String body = """
+            [{"asset":"USDT","balance":"100.00","availableBalance":"100.00"}]
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        assertTrue(client.testConnection("key", "secret", baseUrl));
+    }
+
+    @Test
+    @DisplayName("BinanceClient: testConnection returns false on API error")
+    void binanceTestConnectionFailureViaInterface() {
+        String body = """
+            {"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}
+            """;
+        mockServer.enqueue(new MockResponse()
+            .setResponseCode(403)
+            .setBody(body)
+            .addHeader("Content-Type", "application/json"));
+
+        BinanceClient client = new BinanceClient();
+        assertFalse(client.testConnection("badkey", "badsecret", baseUrl));
+    }
+
     // ─── ExchangeFactory ────────────────────────────────────────────────────────
 
     @Test
@@ -313,5 +410,23 @@ class ExchangeClientMockTest {
 
         BinanceClient client = new BinanceClient();
         assertThrows(Exception.class, () -> client.getPrice("BTCUSDT", baseUrl));
+    }
+
+    // ─── Interface Compliance ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("All exchange clients implement ExchangeClient interface")
+    void allClientsImplementInterface() {
+        assertInstanceOf(ExchangeClient.class, new BinanceClient());
+        assertInstanceOf(ExchangeClient.class, new DeltaClient());
+        assertInstanceOf(ExchangeClient.class, new BybitClient());
+    }
+
+    @Test
+    @DisplayName("All exchange clients return correct exchange name")
+    void allClientsReturnCorrectName() {
+        assertEquals("BINANCE", new BinanceClient().getExchangeName());
+        assertEquals("DELTA", new DeltaClient().getExchangeName());
+        assertEquals("BYBIT", new BybitClient().getExchangeName());
     }
 }

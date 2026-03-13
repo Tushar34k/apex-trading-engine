@@ -89,9 +89,14 @@ public class ApiKeyController {
             ExchangeClient client = exchangeFactory.getClient(key.getExchange());
             String baseUrl = client.resolveBaseUrl("TESTNET");
             log.info("[API_KEY_TEST] Testing {} key={} against {}", key.getExchange(), id, baseUrl);
-            var balances = client.getBalances(decryptedKey, decryptedSecret, baseUrl);
-            return ResponseEntity.ok(Map.of("valid", true,
-                "message", "Connected to " + key.getExchange() + ". Found " + balances.size() + " assets."));
+            boolean valid = client.testConnection(decryptedKey, decryptedSecret, baseUrl);
+            if (valid) {
+                return ResponseEntity.ok(Map.of("valid", true,
+                    "message", "Connected to " + key.getExchange() + " successfully."));
+            } else {
+                return ResponseEntity.ok(Map.of("valid", false,
+                    "message", "Connection test failed for " + key.getExchange()));
+            }
         } catch (UnsupportedOperationException e) {
             return ResponseEntity.ok(Map.of("valid", false,
                 "message", key.getExchange() + " integration is not yet implemented"));
