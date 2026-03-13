@@ -46,7 +46,7 @@ public class OrderBookStrategy implements TradingStrategy {
             }
         }
 
-        // Read order book imbalance from params if injected by BinanceStreamClient
+        // Read order book imbalance from params if injected by MarketDataStreamService
         double bidPressure = getParam(params, "bidVolume", buyVolume);
         double askPressure = getParam(params, "askVolume", sellVolume);
 
