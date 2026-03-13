@@ -55,10 +55,12 @@ public class TradeExecutionQueue {
 
     private final Thread workerThread;
 
-    public TradeExecutionQueue(ExchangeFactory exchangeFactory, KillSwitchService killSwitch, CircuitBreakerService circuitBreaker) {
+    public TradeExecutionQueue(ExchangeFactory exchangeFactory, KillSwitchService killSwitch,
+                               CircuitBreakerService circuitBreaker, OrderNormalizerService orderNormalizer) {
         this.exchangeFactory = exchangeFactory;
         this.killSwitch = killSwitch;
         this.circuitBreaker = circuitBreaker;
+        this.orderNormalizer = orderNormalizer;
         this.workerThread = new Thread(this::processLoop, "trade-execution-worker");
         this.workerThread.setDaemon(true);
         this.workerThread.start();
