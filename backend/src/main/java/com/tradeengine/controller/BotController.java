@@ -30,6 +30,7 @@ public class BotController {
     private final BotService botService;
     private final BotRepository botRepo;
     private final PositionRepository positionRepo;
+    private final TradeExecutionQueue executionQueue;
 
     @Data
     public static class CreateBotRequest {
