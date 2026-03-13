@@ -27,6 +27,7 @@ class TradeExecutionQueueTest {
     private ExchangeFactory exchangeFactory;
     private KillSwitchService killSwitch;
     private CircuitBreakerService circuitBreaker;
+    private OrderNormalizerService orderNormalizer;
     private ExchangeClient mockClient;
 
     @BeforeEach
