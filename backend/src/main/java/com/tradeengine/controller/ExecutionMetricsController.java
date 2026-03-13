@@ -19,9 +19,13 @@ public class ExecutionMetricsController {
     public Map<String, Object> getMetrics() {
         return Map.of(
             "queueSize", executionQueue.getQueueSize(),
+            "queueCapacity", executionQueue.getQueueCapacity(),
             "totalSubmitted", executionQueue.getTotalSubmitted(),
             "totalExecuted", executionQueue.getTotalExecuted(),
-            "totalFailed", executionQueue.getTotalFailed()
+            "totalRejected", executionQueue.getTotalRejected(),
+            "totalFailed", executionQueue.getTotalFailed(),
+            "successRate", Math.round(executionQueue.getSuccessRate() * 10) / 10.0,
+            "avgLatencyMs", Math.round(executionQueue.getAvgLatencyMs() * 10) / 10.0
         );
     }
 }
