@@ -187,7 +187,7 @@ public class StrategyRunner {
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
 
             // Inject order book depth
-            double[] depth = streamClient.getDepth(exchangeSymbol);
+            double[] depth = streamService.getDepth(exchangeName, exchangeSymbol);
             if (depth != null) {
                 params.put("bidVolume", depth[0]);
                 params.put("askVolume", depth[1]);
