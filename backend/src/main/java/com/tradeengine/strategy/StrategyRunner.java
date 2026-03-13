@@ -12,7 +12,7 @@ import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
 import com.tradeengine.service.*;
-import com.tradeengine.ws.BinanceStreamClient;
+import com.tradeengine.ws.MarketDataStreamService;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
