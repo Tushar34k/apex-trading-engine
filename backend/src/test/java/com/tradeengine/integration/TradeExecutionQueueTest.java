@@ -52,7 +52,15 @@ class TradeExecutionQueueTest {
 
         exchangeFactory = mock(ExchangeFactory.class);
         when(exchangeFactory.getClient(anyString())).thenReturn(mockClient);
-    }
+
+        orderNormalizer = mock(OrderNormalizerService.class);
+        // Default: pass-through normalization
+        when(orderNormalizer.normalizeOrder(any(), any(), any(), any(), any(), any()))
+            .thenAnswer(inv -> com.tradeengine.execution.NormalizedOrder.builder()
+                .exchange(inv.getArgument(0)).symbol(inv.getArgument(1)).side(inv.getArgument(4))
+                .rawQuantity(inv.getArgument(2)).rawPrice(inv.getArgument(3))
+                .quantity(inv.getArgument(2)).price(inv.getArgument(3))
+                .valid(true).build());
 
     private TradeRequest buildRequest(String side) {
         return TradeRequest.builder()
