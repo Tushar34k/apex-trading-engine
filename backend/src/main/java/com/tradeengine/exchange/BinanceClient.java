@@ -318,6 +318,7 @@ public class BinanceClient implements ExchangeClient {
      * Fetch open orders for a symbol.
      * Endpoint: GET /fapi/v1/openOrders
      */
+    @Override
     public List<JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl) {
         String base = resolveBase(baseUrl);
         String endpoint = "/fapi/v1/openOrders";
