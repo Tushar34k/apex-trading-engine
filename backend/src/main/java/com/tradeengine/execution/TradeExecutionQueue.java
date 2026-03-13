@@ -206,7 +206,39 @@ public class TradeExecutionQueue {
                     req.getExchange(), req.getSymbol(), req.getSide(),
                     req.getQuantity(), req.getBotId(), req.getRequestId());
 
-                TradeRequest.TradeResult result = executeWithRetry(req);
+                // ── Order Normalization ──
+                NormalizedOrder normalized = null;
+                if (orderNormalizer != null) {
+                    normalized = orderNormalizer.normalizeOrder(
+                        req.getExchange(), req.getSymbol(), req.getQuantity(),
+                        req.getPrice(), req.getSide(), req.getExchangeBaseUrl());
+
+                    if (!normalized.isValid()) {
+                        log.warn("[ORDER_REJECTED] botId={} exchange={} symbol={} reason={}",
+                            req.getBotId(), req.getExchange(), req.getSymbol(), normalized.getValidationMessage());
+                        pendingTrades.remove(req.getBotId());
+                        processedRequests.remove(req.getRequestId());
+                        req.getResultFuture().complete(TradeRequest.TradeResult.builder()
+                            .success(false).errorMessage("Order normalization failed: " + normalized.getValidationMessage()).build());
+                        totalFailed.incrementAndGet();
+                        continue;
+                    }
+                }
+
+                TradeRequest normalizedReq = normalized != null
+                    ? TradeRequest.builder()
+                        .requestId(req.getRequestId()).botId(req.getBotId()).userId(req.getUserId())
+                        .symbol(req.getSymbol()).side(req.getSide())
+                        .quantity(normalized.getQuantity()).price(normalized.getPrice())
+                        .orderType(req.getOrderType()).apiKey(req.getApiKey()).apiSecret(req.getApiSecret())
+                        .exchangeBaseUrl(req.getExchangeBaseUrl()).exchange(req.getExchange())
+                        .exchangeMode(req.getExchangeMode()).timestamp(req.getTimestamp())
+                        .stopLossPrice(req.getStopLossPrice()).takeProfitPrice(req.getTakeProfitPrice())
+                        .trailingStopPercent(req.getTrailingStopPercent())
+                        .build()
+                    : req;
+
+                TradeRequest.TradeResult result = executeWithRetry(normalizedReq);
 
                 pendingTrades.remove(req.getBotId());
                 processedRequests.remove(req.getRequestId());
