@@ -257,6 +257,80 @@ public class BybitClient implements ExchangeClient {
     }
 
     @Override
+    public boolean testConnection(String apiKey, String secret, String baseUrl) {
+        try {
+            List<Balance> balances = getBalances(apiKey, secret, baseUrl);
+            log.info("[BYBIT] Connection test successful — {} assets found", balances.size());
+            return true;
+        } catch (Exception e) {
+            log.error("[BYBIT] Connection test failed: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public OrderResponse cancelOrder(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v5/order/cancel";
+            long timestamp = System.currentTimeMillis();
+
+            var payload = new java.util.LinkedHashMap<String, Object>();
+            payload.put("category", "spot");
+            payload.put("symbol", symbol);
+            payload.put("orderId", orderId);
+
+            String body = mapper.writeValueAsString(payload);
+            String signature = sign(timestamp, apiKey, body, secret);
+
+            log.info("[BYBIT] Cancelling order: symbol={} orderId={}", symbol, orderId);
+            String responseBody = post(base + path, apiKey, timestamp, signature, body);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+            JsonNode result = root.get("result");
+
+            return OrderResponse.builder()
+                .orderId(result.path("orderId").asText(orderId))
+                .symbol(symbol)
+                .status("CANCELLED")
+                .build();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BYBIT] Cancel order failed: symbol={} orderId={} error={}", symbol, orderId, e.getMessage());
+            throw new RuntimeException("Bybit cancel order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v5/order/realtime";
+            String queryString = "category=spot&symbol=" + symbol;
+            long timestamp = System.currentTimeMillis();
+
+            String signature = sign(timestamp, apiKey, queryString, secret);
+            String responseBody = getSigned(base + path + "?" + queryString, apiKey, timestamp, signature);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+
+            JsonNode list = root.path("result").path("list");
+            List<JsonNode> orders = new ArrayList<>();
+            if (list.isArray()) {
+                for (JsonNode order : list) {
+                    orders.add(order);
+                }
+            }
+            log.info("[BYBIT] Fetched {} open orders for {}", orders.size(), symbol);
+            return orders;
+        } catch (Exception e) {
+            log.error("[BYBIT] getOpenOrders failed: symbol={} error={}", symbol, e.getMessage());
+            return List.of();
+        }
+    }
+
+    @Override
     public String resolveBaseUrl(String mode) {
         if ("LIVE".equalsIgnoreCase(mode)) {
             return liveBaseUrl;
