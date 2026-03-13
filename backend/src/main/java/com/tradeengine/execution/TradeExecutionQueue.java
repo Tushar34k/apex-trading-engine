@@ -223,9 +223,34 @@ public class TradeExecutionQueue {
                 if (riskValidator != null) {
                     BigDecimal checkPrice = normalized != null ? normalized.getPrice() : req.getPrice();
                     BigDecimal checkQty = normalized != null ? normalized.getQuantity() : req.getQuantity();
+
+                    // Fetch account balance from exchange for real risk validation
+                    BigDecimal accountBalance = null;
+                    try {
+                        ExchangeClient balanceClient = exchangeFactory.getClient(req.getExchange());
+                        List<Balance> balances = balanceClient.getBalances(req.getApiKey(), req.getApiSecret(), req.getExchangeBaseUrl());
+                        accountBalance = balances.stream()
+                            .filter(b -> "USDT".equalsIgnoreCase(b.getAsset()) || "USD".equalsIgnoreCase(b.getAsset()))
+                            .map(Balance::getTotal)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                        log.debug("[RISK_CHECK] exchange={} accountBalance={}", req.getExchange(), accountBalance);
+                    } catch (Exception e) {
+                        log.warn("[RISK_CHECK] Failed to fetch balance for risk validation, skipping: {}", e.getMessage());
+                    }
+
                     String riskError = riskValidator.validatePositionSize(
-                        req.getExchange(), req.getSymbol(), checkQty, checkPrice, null);
-                    // Note: accountBalance=null skips the check. In production, inject balance from BalanceService.
+                        req.getExchange(), req.getSymbol(), checkQty, checkPrice, accountBalance);
+                    if (riskError != null) {
+                        pendingTrades.remove(req.getBotId());
+                        processedRequests.remove(req.getRequestId());
+                        recordRejection(req.getBotId(), req.getSymbol(), riskError);
+                        req.getResultFuture().complete(TradeRequest.TradeResult.builder()
+                            .success(false).errorMessage("Position risk check failed: " + riskError).build());
+                        totalRejected.incrementAndGet();
+                        totalFailed.incrementAndGet();
+                        log.warn("[ORDER_REJECTED] reason=RISK_LIMIT botId={} symbol={} {}", req.getBotId(), req.getSymbol(), riskError);
+                        continue;
+                    }
                 }
 
                 TradeRequest normalizedReq = normalized != null
