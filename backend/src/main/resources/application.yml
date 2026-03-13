@@ -44,6 +44,10 @@ exchange:
 live-trading:
   enabled: ${LIVE_TRADING_ENABLED:false}
 
+risk:
+  maxPositionPercent: ${RISK_MAX_POSITION_PERCENT:20}
+  maxSingleTradePercent: ${RISK_MAX_SINGLE_TRADE_PERCENT:5}
+
 symbols:
   mappings:
     "BTC/USDT":

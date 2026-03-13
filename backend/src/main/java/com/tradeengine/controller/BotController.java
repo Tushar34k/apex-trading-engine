@@ -5,6 +5,7 @@ import com.tradeengine.model.TradePosition;
 import com.tradeengine.repository.BotRepository;
 import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.service.BotService;
+import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.strategy.StrategyFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -29,6 +30,7 @@ public class BotController {
     private final BotService botService;
     private final BotRepository botRepo;
     private final PositionRepository positionRepo;
+    private final TradeExecutionQueue executionQueue;
 
     @Data
     public static class CreateBotRequest {
@@ -196,6 +198,14 @@ public class BotController {
         map.put("pnl", totalPnl);
         map.put("totalTrades", totalTrades);
         map.put("winRate", Math.round(winRate * 10) / 10.0);
+
+        // Recent rejections for this bot
+        var rejections = executionQueue.getRecentRejections().stream()
+            .filter(r -> r.botId().equals(b.getId()))
+            .map(r -> Map.of("timestamp", r.timestamp(), "symbol", r.symbol(), "reason", r.reason()))
+            .toList();
+        map.put("recentRejections", rejections);
+
         return map;
     }
 }
