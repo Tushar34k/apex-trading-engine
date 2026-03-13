@@ -5,6 +5,7 @@ import com.tradeengine.model.TradePosition;
 import com.tradeengine.repository.BotRepository;
 import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.service.BotService;
+import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.strategy.StrategyFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
