@@ -530,6 +530,7 @@ public class BinanceClient implements ExchangeClient {
         var builder = HttpRequest.newBuilder().uri(URI.create(url)).GET()
             .timeout(Duration.ofSeconds(10));
         if (apiKey != null) {
+            logApiKeyDiagnostics(apiKey, "GET", url.split("\\?")[0]);
             builder.header("X-MBX-APIKEY", apiKey);
         }
 
@@ -537,7 +538,6 @@ public class BinanceClient implements ExchangeClient {
 
         if (resp.statusCode() != 200) {
             log.error("[BINANCE] HTTP {} from GET {}: {}", resp.statusCode(), url.split("\\?")[0], resp.body());
-            // Parse Binance error codes for clear messaging
             parseBinanceError(resp.body(), resp.statusCode());
         }
 
@@ -545,6 +545,8 @@ public class BinanceClient implements ExchangeClient {
     }
 
     private String post(String url, String apiKey) throws Exception {
+        logApiKeyDiagnostics(apiKey, "POST", url.split("\\?")[0]);
+
         var req = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .header("X-MBX-APIKEY", apiKey)
@@ -560,6 +562,20 @@ public class BinanceClient implements ExchangeClient {
         }
 
         return resp.body();
+    }
+
+    /**
+     * Log API key diagnostics without exposing the full key.
+     */
+    private void logApiKeyDiagnostics(String apiKey, String method, String endpoint) {
+        if (apiKey == null || apiKey.isEmpty()) {
+            log.warn("[BINANCE] {} {} — API key is NULL or EMPTY!", method, endpoint);
+            return;
+        }
+        String prefix = apiKey.substring(0, Math.min(4, apiKey.length()));
+        String suffix = apiKey.length() > 4 ? apiKey.substring(apiKey.length() - 4) : "****";
+        log.debug("[BINANCE] {} {} — X-MBX-APIKEY length={} prefix={} suffix={}",
+            method, endpoint, apiKey.length(), prefix, suffix);
     }
 
     /**
