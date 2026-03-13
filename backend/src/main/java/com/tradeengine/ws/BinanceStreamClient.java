@@ -24,8 +24,9 @@ import java.util.function.BiConsumer;
 @Slf4j
 public class BinanceStreamClient {
 
-    private static final String WS_BASE = "wss://stream.binance.com:9443/stream?streams=";
-    private static final String TESTNET_WS_BASE = "wss://testnet.binance.vision/stream?streams=";
+    // Binance Futures WebSocket streams (not Spot)
+    private static final String WS_BASE = "wss://fstream.binance.com/stream?streams=";
+    private static final String TESTNET_WS_BASE = "wss://stream.binancefuture.com/stream?streams=";
     private static final long STALE_THRESHOLD_MS = 5000;
 
     private final ObjectMapper mapper = new ObjectMapper();
