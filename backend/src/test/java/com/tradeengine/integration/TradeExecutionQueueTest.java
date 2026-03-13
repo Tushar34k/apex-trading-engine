@@ -165,7 +165,7 @@ class TradeExecutionQueueTest {
                     .build();
             });
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer);
 
         UUID botId = UUID.randomUUID();
         TradeRequest req1 = TradeRequest.builder()
