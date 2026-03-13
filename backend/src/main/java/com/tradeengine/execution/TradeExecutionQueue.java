@@ -1,5 +1,6 @@
 package com.tradeengine.execution;
 
+import com.tradeengine.exchange.Balance;
 import com.tradeengine.exchange.ExchangeClient;
 import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.exchange.OrderResponse;
