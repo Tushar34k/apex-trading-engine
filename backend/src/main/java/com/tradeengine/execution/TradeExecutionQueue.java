@@ -78,12 +78,14 @@ public class TradeExecutionQueue {
 
     public TradeExecutionQueue(ExchangeFactory exchangeFactory, KillSwitchService killSwitch,
                                CircuitBreakerService circuitBreaker, OrderNormalizerService orderNormalizer,
-                               PositionRiskValidator riskValidator) {
+                               PositionRiskValidator riskValidator,
+                               @org.springframework.context.annotation.Lazy PositionSyncService positionSyncService) {
         this.exchangeFactory = exchangeFactory;
         this.killSwitch = killSwitch;
         this.circuitBreaker = circuitBreaker;
         this.orderNormalizer = orderNormalizer;
         this.riskValidator = riskValidator;
+        this.positionSyncService = positionSyncService;
         this.workerThread = new Thread(this::processLoop, "trade-execution-worker");
         this.workerThread.setDaemon(true);
         this.workerThread.start();
