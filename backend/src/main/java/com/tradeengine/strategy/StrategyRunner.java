@@ -378,11 +378,14 @@ public class StrategyRunner {
                                    String apiKey, String apiSecret,
                                    String exchangeName, String exchangeMode, String exchangeBaseUrl,
                                    Map<String, Object> params) {
+        // Reload bot from DB to avoid race condition with async callback
+        TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
+
         TradeOrder order = new TradeOrder();
-        order.setBotId(bot.getId());
-        order.setUserId(bot.getUserId());
+        order.setBotId(freshBot.getId());
+        order.setUserId(freshBot.getUserId());
         order.setExchangeOrderId(result.getOrderId());
-        order.setSymbol(bot.getSymbol());
+        order.setSymbol(freshBot.getSymbol());
         order.setSide("BUY");
         order.setType("MARKET");
         order.setQuantity(result.getExecutedQty());
@@ -392,16 +395,17 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        bot.setHasOpenPosition(true);
-        bot.setEntryPrice(result.getAvgPrice());
-        bot.setQuantity(result.getExecutedQty());
-        bot.setLastTradeTime(Instant.now());
-        botRepo.save(bot);
+        freshBot.setHasOpenPosition(true);
+        freshBot.setEntryPrice(result.getAvgPrice());
+        freshBot.setQuantity(result.getExecutedQty());
+        freshBot.setLastTradeTime(Instant.now());
+        botRepo.save(freshBot);
 
         TradePosition position = new TradePosition();
-        position.setBotId(bot.getId());
-        position.setUserId(bot.getUserId());
-        position.setSymbol(bot.getSymbol());
+        position.setBotId(freshBot.getId());
+        position.setUserId(freshBot.getUserId());
+        position.setSymbol(freshBot.getSymbol());
+        position.setExchange(exchangeName);
         position.setSide("LONG");
         position.setQuantity(result.getExecutedQty());
         position.setEntryPrice(result.getAvgPrice());
