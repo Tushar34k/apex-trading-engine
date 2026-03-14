@@ -8,6 +8,7 @@ import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
 import com.tradeengine.service.OrderNormalizerService;
 import com.tradeengine.service.PositionRiskValidator;
+import com.tradeengine.service.PositionSyncService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
