@@ -8,6 +8,7 @@ import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
 import com.tradeengine.service.OrderNormalizerService;
 import com.tradeengine.service.PositionRiskValidator;
+import com.tradeengine.service.PositionSyncService;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,12 +40,14 @@ public class TradeExecutionQueue {
     private static final long RATE_LIMIT_DELAY_MS = 100;
     private static final int QUEUE_CAPACITY = 1000;
     private static final double QUEUE_WARNING_THRESHOLD = 0.9;
+    private static final long PARTIAL_FILL_WAIT_MS = 1000;
 
     private final ExchangeFactory exchangeFactory;
     private final KillSwitchService killSwitch;
     private final CircuitBreakerService circuitBreaker;
     private final OrderNormalizerService orderNormalizer;
     private final PositionRiskValidator riskValidator;
+    private final PositionSyncService positionSyncService;
     private final BlockingQueue<TradeRequest> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean running = new AtomicBoolean(true);
 
@@ -75,12 +78,14 @@ public class TradeExecutionQueue {
 
     public TradeExecutionQueue(ExchangeFactory exchangeFactory, KillSwitchService killSwitch,
                                CircuitBreakerService circuitBreaker, OrderNormalizerService orderNormalizer,
-                               PositionRiskValidator riskValidator) {
+                               PositionRiskValidator riskValidator,
+                               @org.springframework.context.annotation.Lazy PositionSyncService positionSyncService) {
         this.exchangeFactory = exchangeFactory;
         this.killSwitch = killSwitch;
         this.circuitBreaker = circuitBreaker;
         this.orderNormalizer = orderNormalizer;
         this.riskValidator = riskValidator;
+        this.positionSyncService = positionSyncService;
         this.workerThread = new Thread(this::processLoop, "trade-execution-worker");
         this.workerThread.setDaemon(true);
         this.workerThread.start();
@@ -283,6 +288,9 @@ public class TradeExecutionQueue {
                         req.getExchange(), req.getSymbol(), req.getSide(),
                         result.getExecutedQty(), result.getOrderId(), result.getAvgPrice(),
                         req.getBotId(), latencyMs);
+
+                    // Trigger post-trade position sync
+                    triggerPostTradeSync();
                 } else {
                     totalFailed.incrementAndGet();
                     log.error("[TRADE_FAILED] exchange={} symbol={} side={} qty={} botId={} error={} latency={}ms",
@@ -291,6 +299,8 @@ public class TradeExecutionQueue {
                 }
 
                 req.getResultFuture().complete(result);
+                log.info("[POSITION_UPDATED] botId={} symbol={} side={} exchange={}",
+                    req.getBotId(), req.getSymbol(), req.getSide(), req.getExchange());
                 Thread.sleep(RATE_LIMIT_DELAY_MS);
 
             } catch (InterruptedException e) {
@@ -340,10 +350,35 @@ public class TradeExecutionQueue {
                         .success(false).errorMessage(validationError).build();
                 }
 
+                // ── Partial fill handling ──
+                if (orderResult.isPartiallyFilled()) {
+                    log.warn("[PARTIAL_FILL] exchange={} symbol={} orderId={} executedQty={} — waiting for fill update",
+                        req.getExchange(), req.getSymbol(), orderResult.getOrderId(), orderResult.getExecutedQty());
+                    try {
+                        Thread.sleep(PARTIAL_FILL_WAIT_MS);
+                        OrderResponse updated = exchangeClient.queryOrderStatus(
+                            req.getApiKey(), req.getApiSecret(), req.getSymbol(),
+                            orderResult.getOrderId(), req.getExchangeBaseUrl());
+                        log.info("[PARTIAL_FILL_UPDATE] exchange={} symbol={} orderId={} status={} executedQty={}",
+                            req.getExchange(), req.getSymbol(), updated.getOrderId(),
+                            updated.getStatus(), updated.getExecutedQty());
+                        orderResult = updated;
+                    } catch (Exception pfe) {
+                        log.warn("[PARTIAL_FILL] Failed to query updated status, using original: {}", pfe.getMessage());
+                    }
+                }
+
+                // Always use executedQty from exchange — never assume full fill
+                BigDecimal finalExecutedQty = orderResult.getExecutedQty();
+                if (finalExecutedQty == null || finalExecutedQty.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                    finalExecutedQty = req.getQuantity(); // fallback only if exchange didn't report
+                    log.warn("[PARTIAL_FILL] executedQty missing from response, using requested qty={}", finalExecutedQty);
+                }
+
                 return TradeRequest.TradeResult.builder()
                     .success(true)
                     .orderId(orderResult.getOrderId())
-                    .executedQty(orderResult.getExecutedQty())
+                    .executedQty(finalExecutedQty)
                     .avgPrice(orderResult.getAvgPrice())
                     .build();
 
@@ -447,6 +482,20 @@ public class TradeExecutionQueue {
     }
     public java.util.List<RejectionRecord> getRecentRejections() {
         return new java.util.ArrayList<>(recentRejections);
+    }
+
+    /**
+     * Trigger position sync after trade execution to ensure internal state matches exchange.
+     */
+    private void triggerPostTradeSync() {
+        if (positionSyncService != null) {
+            try {
+                positionSyncService.syncPositions();
+                log.debug("[POST_TRADE_SYNC] Position sync triggered after trade execution");
+            } catch (Exception e) {
+                log.warn("[POST_TRADE_SYNC] Failed to sync positions: {}", e.getMessage());
+            }
+        }
     }
 
     @PreDestroy
