@@ -212,6 +212,15 @@ public class StrategyRunner {
             }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
+                // If strategy provides SL/TP (e.g. ENHANCED_EMA), inject into params
+                if (signal.stopLoss() != null) {
+                    double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
+                    params.put("stopLossPercent", slPercent);
+                }
+                if (signal.takeProfit() != null) {
+                    double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
+                    params.put("takeProfitPercent", tpPercent);
+                }
                 submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient, exchangeSymbol);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
