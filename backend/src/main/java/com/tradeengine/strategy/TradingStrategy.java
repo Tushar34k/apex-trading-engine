@@ -11,7 +11,13 @@ public interface TradingStrategy {
 
     enum Signal { BUY, SELL, HOLD }
 
-    record SignalResult(Signal signal, double price, String reason) {}
+    record SignalResult(Signal signal, double price, String reason,
+                        Double stopLoss, Double takeProfit, String confidence) {
+        /** Backward-compatible constructor for existing strategies */
+        SignalResult(Signal signal, double price, String reason) {
+            this(signal, price, reason, null, null, null);
+        }
+    }
 
     /**
      * @param closingPrices closing prices oldest→newest

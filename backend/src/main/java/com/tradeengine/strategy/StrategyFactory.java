@@ -20,6 +20,7 @@ public class StrategyFactory {
         STRATEGIES.put("MACD", new MacdStrategy());
         STRATEGIES.put("BREAKOUT", new BreakoutStrategy());
         STRATEGIES.put("ORDER_BOOK", new OrderBookStrategy());
+        STRATEGIES.put("ENHANCED_EMA", new EnhancedEmaCrossover());
     }
 
     public static TradingStrategy get(String strategyType) {
