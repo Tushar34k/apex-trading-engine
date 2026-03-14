@@ -477,6 +477,48 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
+    /**
+     * Query order status by orderId.
+     * Endpoint: GET /fapi/v1/order
+     */
+    @Override
+    public OrderResponse queryOrderStatus(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        String base = resolveBase(baseUrl);
+        String endpoint = "/fapi/v1/order";
+
+        long timestamp = System.currentTimeMillis();
+        String params = buildQueryString(
+            "symbol", symbol,
+            "orderId", orderId,
+            "recvWindow", String.valueOf(recvWindow),
+            "timestamp", String.valueOf(timestamp)
+        );
+
+        String signed = appendSignature(params, secret);
+        String url = base + endpoint + "?" + signed;
+
+        log.info("[BINANCE] GET {} symbol={} orderId={}", endpoint, symbol, orderId);
+
+        try {
+            String body = get(url, apiKey);
+            log.debug("[BINANCE] GET {} response={}", endpoint, body);
+
+            JsonNode node = parseAndValidate(body);
+
+            return OrderResponse.builder()
+                .orderId(node.path("orderId").asText(orderId))
+                .symbol(node.path("symbol").asText(symbol))
+                .side(node.path("side").asText())
+                .status(node.path("status").asText())
+                .executedQty(new BigDecimal(node.path("executedQty").asText("0")))
+                .avgPrice(new BigDecimal(node.path("avgPrice").asText("0")))
+                .build();
+        } catch (Exception e) {
+            log.error("[BINANCE] queryOrderStatus failed: symbol={} orderId={} error={}", symbol, orderId, e.getMessage());
+            throw new RuntimeException("Binance query order failed: " + e.getMessage(), e);
+        }
+    }
+
     // ─── Signing & HTTP helpers ─────────────────────────────────────────────────
 
     private String resolveBase(String baseUrl) {
