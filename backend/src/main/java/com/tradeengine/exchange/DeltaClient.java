@@ -358,6 +358,37 @@ public class DeltaClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse queryOrderStatus(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v2/orders/" + orderId;
+            long timestamp = System.currentTimeMillis() / 1000;
+
+            String signature = sign("GET" + timestamp + path, secret);
+            String responseBody = getSigned(base + path, apiKey, String.valueOf(timestamp), signature);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+
+            JsonNode result = root.get("result");
+            return OrderResponse.builder()
+                .orderId(String.valueOf(result.path("id").asLong()))
+                .symbol(result.path("product_symbol").asText(symbol))
+                .side(result.path("side").asText().toUpperCase())
+                .status(result.path("state").asText())
+                .executedQty(new BigDecimal(result.path("size").asText("0")))
+                .avgPrice(result.has("avg_fill_price") && !result.get("avg_fill_price").isNull()
+                    ? new BigDecimal(result.get("avg_fill_price").asText())
+                    : null)
+                .build();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[DELTA] queryOrderStatus failed: orderId={} error={}", orderId, e.getMessage());
+            throw new RuntimeException("Delta query order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
         try {
             String base = resolveBase(baseUrl);

@@ -340,6 +340,40 @@ public class BybitClient implements ExchangeClient {
     }
 
     @Override
+    public OrderResponse queryOrderStatus(String apiKey, String secret, String symbol, String orderId, String baseUrl) {
+        try {
+            String base = resolveBase(baseUrl);
+            String path = "/v5/order/realtime";
+            String queryString = "category=spot&symbol=" + symbol + "&orderId=" + orderId;
+            long timestamp = System.currentTimeMillis();
+
+            String signature = sign(timestamp, apiKey, queryString, secret);
+            String responseBody = getSigned(base + path + "?" + queryString, apiKey, timestamp, signature);
+            JsonNode root = mapper.readTree(responseBody);
+            validateResponse(root);
+
+            JsonNode list = root.path("result").path("list");
+            if (list.isArray() && list.size() > 0) {
+                JsonNode order = list.get(0);
+                return OrderResponse.builder()
+                    .orderId(order.path("orderId").asText(orderId))
+                    .symbol(order.path("symbol").asText(symbol))
+                    .side(order.path("side").asText().toUpperCase())
+                    .status(mapBybitStatus(order.path("orderStatus").asText("New")))
+                    .executedQty(new BigDecimal(order.path("cumExecQty").asText("0")))
+                    .avgPrice(new BigDecimal(order.path("avgPrice").asText("0")))
+                    .build();
+            }
+            throw new RuntimeException("Order not found: " + orderId);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BYBIT] queryOrderStatus failed: symbol={} orderId={} error={}", symbol, orderId, e.getMessage());
+            throw new RuntimeException("Bybit query order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
         try {
             String base = resolveBase(baseUrl);
