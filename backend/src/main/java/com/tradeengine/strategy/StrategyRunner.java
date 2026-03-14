@@ -454,11 +454,14 @@ public class StrategyRunner {
     }
 
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
+        // Reload bot from DB to avoid race condition with async callback
+        TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
+
         TradeOrder order = new TradeOrder();
-        order.setBotId(bot.getId());
-        order.setUserId(bot.getUserId());
+        order.setBotId(freshBot.getId());
+        order.setUserId(freshBot.getUserId());
         order.setExchangeOrderId(result.getOrderId());
-        order.setSymbol(bot.getSymbol());
+        order.setSymbol(freshBot.getSymbol());
         order.setSide("SELL");
         order.setType("MARKET");
         order.setQuantity(result.getExecutedQty());
@@ -469,42 +472,42 @@ public class StrategyRunner {
         orderRepo.save(order);
 
         BigDecimal pnl = BigDecimal.ZERO;
-        if (bot.getEntryPrice() != null) {
-            pnl = result.getAvgPrice().subtract(bot.getEntryPrice()).multiply(bot.getQuantity());
+        if (freshBot.getEntryPrice() != null) {
+            pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(freshBot.getQuantity());
         }
 
         // Search by botId + OPEN status (more reliable than symbol match for multi-exchange)
         TradePosition position = positionRepo
-            .findFirstByBotIdAndStatusOrderByOpenedAtDesc(bot.getId(), "OPEN").orElse(null);
+            .findFirstByBotIdAndStatusOrderByOpenedAtDesc(freshBot.getId(), "OPEN").orElse(null);
         if (position != null) {
             position.setStatus("CLOSED");
             position.setExitPrice(result.getAvgPrice());
             position.setRealizedPnl(pnl);
             position.setClosedAt(Instant.now());
             positionRepo.save(position);
-            publisher.publishPositionClosed(bot.getUserId().toString(), position, pnl);
+            publisher.publishPositionClosed(freshBot.getUserId().toString(), position, pnl);
         }
 
-        bot.setHasOpenPosition(false);
-        bot.setEntryPrice(null);
-        bot.setQuantity(null);
-        bot.setLastTradeTime(Instant.now());
-        botRepo.save(bot);
+        freshBot.setHasOpenPosition(false);
+        freshBot.setEntryPrice(null);
+        freshBot.setQuantity(null);
+        freshBot.setLastTradeTime(Instant.now());
+        botRepo.save(freshBot);
 
-        trailingStopService.resetBot(bot.getId());
-        positionTracker.removePosition(bot.getId());
-        publisher.publishOrderFilled(bot.getUserId().toString(), order);
+        trailingStopService.resetBot(freshBot.getId());
+        positionTracker.removePosition(freshBot.getId());
+        publisher.publishOrderFilled(freshBot.getUserId().toString(), order);
 
-        String userId = bot.getUserId().toString();
+        String userId = freshBot.getUserId().toString();
         switch (notificationType) {
-            case "BOT_SL" -> notificationService.notifyStopLoss(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
-            case "BOT_TP" -> notificationService.notifyTakeProfit(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
-            case "BOT_TRAILING_SL" -> notificationService.notifyTrailingStop(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
-            default -> notificationService.notifySell(userId, bot.getName(), bot.getSymbol(), result.getAvgPrice(), pnl);
+            case "BOT_SL" -> notificationService.notifyStopLoss(userId, freshBot.getName(), freshBot.getSymbol(), result.getAvgPrice(), pnl);
+            case "BOT_TP" -> notificationService.notifyTakeProfit(userId, freshBot.getName(), freshBot.getSymbol(), result.getAvgPrice(), pnl);
+            case "BOT_TRAILING_SL" -> notificationService.notifyTrailingStop(userId, freshBot.getName(), freshBot.getSymbol(), result.getAvgPrice(), pnl);
+            default -> notificationService.notifySell(userId, freshBot.getName(), freshBot.getSymbol(), result.getAvgPrice(), pnl);
         }
 
         log.info("Bot {} [{}]: SELL filled via queue. Exit={}, PnL={}",
-            bot.getId(), bot.getName(), result.getAvgPrice(), pnl);
+            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), pnl);
     }
 
     private String resolveExchangeUrl(String exchangeMode, ExchangeClient exchangeClient) {

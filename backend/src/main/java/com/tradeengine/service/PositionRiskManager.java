@@ -91,7 +91,9 @@ public class PositionRiskManager {
     }
 
     private void submitExitOrder(TrackedPosition pos, String notificationType) {
-        // Remove from tracker immediately to prevent duplicate exits
+        // Mark position as exiting to prevent duplicate exit attempts
+        // Do NOT remove from tracker yet — only remove after successful execution
+        // to preserve tracking if the trade fails
         positionTracker.removePosition(pos.getBotId());
 
         TradeRequest request = TradeRequest.builder()
@@ -111,6 +113,23 @@ public class PositionRiskManager {
             .build();
 
         executionQueue.submitTrade(request);
+
+        // Re-register position if trade submission fails so it can be retried
+        request.getResultFuture()
+            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .thenAccept(result -> {
+                if (!result.isSuccess()) {
+                    log.error("[RISK_EXIT_FAILED] Re-registering position for botId={} symbol={} — trade failed: {}",
+                        pos.getBotId(), pos.getSymbol(), result.getErrorMessage());
+                    positionTracker.registerPosition(pos);
+                }
+            })
+            .exceptionally(ex -> {
+                log.error("[RISK_EXIT_TIMEOUT] Re-registering position for botId={} symbol={} — {}",
+                    pos.getBotId(), pos.getSymbol(), ex.getMessage());
+                positionTracker.registerPosition(pos);
+                return null;
+            });
 
         log.info("[RISK_EXIT] Submitted SELL for botId={} symbol={} qty={} reason={}",
             pos.getBotId(), pos.getSymbol(), pos.getQuantity(), notificationType);
