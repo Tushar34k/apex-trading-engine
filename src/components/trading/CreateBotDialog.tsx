@@ -53,6 +53,11 @@ const STRATEGY_CONFIGS: Record<StrategyType, { label: string; description: strin
     description: "Buy/sell based on bid/ask volume imbalance from live depth stream",
     defaultParams: { imbalanceThreshold: 1.5 },
   },
+  ENHANCED_EMA: {
+    label: "Enhanced EMA (Futures)",
+    description: "EMA crossover with EMA200 trend filter, volume confirmation, ATR volatility filter, and auto SL/TP",
+    defaultParams: { fastEma: 9, slowEma: 21, trendEma: 200, volumeMultiplier: 1.5, atrSpikeMultiplier: 3, rrRatio: 2 },
+  },
 };
 
 export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
