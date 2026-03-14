@@ -40,6 +40,7 @@ public class TradeExecutionQueue {
     private static final long RATE_LIMIT_DELAY_MS = 100;
     private static final int QUEUE_CAPACITY = 1000;
     private static final double QUEUE_WARNING_THRESHOLD = 0.9;
+    private static final long PARTIAL_FILL_WAIT_MS = 1000;
 
     private final ExchangeFactory exchangeFactory;
     private final KillSwitchService killSwitch;
