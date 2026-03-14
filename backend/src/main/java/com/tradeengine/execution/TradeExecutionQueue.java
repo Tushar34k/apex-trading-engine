@@ -484,6 +484,20 @@ public class TradeExecutionQueue {
         return new java.util.ArrayList<>(recentRejections);
     }
 
+    /**
+     * Trigger position sync after trade execution to ensure internal state matches exchange.
+     */
+    private void triggerPostTradeSync() {
+        if (positionSyncService != null) {
+            try {
+                positionSyncService.syncPositions();
+                log.debug("[POST_TRADE_SYNC] Position sync triggered after trade execution");
+            } catch (Exception e) {
+                log.warn("[POST_TRADE_SYNC] Failed to sync positions: {}", e.getMessage());
+            }
+        }
+    }
+
     @PreDestroy
     public void shutdown() {
         log.info("[QUEUE] Shutting down — draining {} remaining trades", queue.size());
