@@ -350,10 +350,35 @@ public class TradeExecutionQueue {
                         .success(false).errorMessage(validationError).build();
                 }
 
+                // ── Partial fill handling ──
+                if (orderResult.isPartiallyFilled()) {
+                    log.warn("[PARTIAL_FILL] exchange={} symbol={} orderId={} executedQty={} — waiting for fill update",
+                        req.getExchange(), req.getSymbol(), orderResult.getOrderId(), orderResult.getExecutedQty());
+                    try {
+                        Thread.sleep(PARTIAL_FILL_WAIT_MS);
+                        OrderResponse updated = exchangeClient.queryOrderStatus(
+                            req.getApiKey(), req.getApiSecret(), req.getSymbol(),
+                            orderResult.getOrderId(), req.getExchangeBaseUrl());
+                        log.info("[PARTIAL_FILL_UPDATE] exchange={} symbol={} orderId={} status={} executedQty={}",
+                            req.getExchange(), req.getSymbol(), updated.getOrderId(),
+                            updated.getStatus(), updated.getExecutedQty());
+                        orderResult = updated;
+                    } catch (Exception pfe) {
+                        log.warn("[PARTIAL_FILL] Failed to query updated status, using original: {}", pfe.getMessage());
+                    }
+                }
+
+                // Always use executedQty from exchange — never assume full fill
+                BigDecimal finalExecutedQty = orderResult.getExecutedQty();
+                if (finalExecutedQty == null || finalExecutedQty.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+                    finalExecutedQty = req.getQuantity(); // fallback only if exchange didn't report
+                    log.warn("[PARTIAL_FILL] executedQty missing from response, using requested qty={}", finalExecutedQty);
+                }
+
                 return TradeRequest.TradeResult.builder()
                     .success(true)
                     .orderId(orderResult.getOrderId())
-                    .executedQty(orderResult.getExecutedQty())
+                    .executedQty(finalExecutedQty)
                     .avgPrice(orderResult.getAvgPrice())
                     .build();
 
