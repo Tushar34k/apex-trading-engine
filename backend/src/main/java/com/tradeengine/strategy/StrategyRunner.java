@@ -179,14 +179,36 @@ public class StrategyRunner {
                 }
             }
 
-            // --- Fetch candles via exchange client ---
-            List<double[]> candles = exchangeClient.getCandles(exchangeSymbol, bot.getTimeframe(), 100, exchangeBaseUrl);
+            // --- Fetch candles via exchange client (with cache) ---
+            String entryTf = params.containsKey("entryTf") ? params.get("entryTf").toString() : bot.getTimeframe();
+            String trendTfParam = params.containsKey("trendTf") ? params.get("trendTf").toString() : "15m";
+            String macroTfParam = params.containsKey("macroTf") ? params.get("macroTf").toString() : "1h";
+
+            List<double[]> candles = candleCacheService.getCandles(
+                exchangeClient, decryptedKey, decryptedSecret, exchangeSymbol, entryTf, 300, exchangeBaseUrl);
             if (candles.size() < 50) {
                 log.warn("Bot {}: only {} candles, need 50+. Skip.", bot.getId(), candles.size());
                 return;
             }
 
             List<Double> closingPrices = candles.stream().map(c -> c[4]).collect(Collectors.toList());
+
+            // Fetch higher timeframe candles for multi-TF confirmation (with fallback)
+            List<double[]> trendCandles = null;
+            List<double[]> macroCandles = null;
+            if ("ENHANCED_EMA".equals(bot.getStrategyType())) {
+                trendCandles = candleCacheService.getCandles(
+                    exchangeClient, decryptedKey, decryptedSecret, exchangeSymbol, trendTfParam, 300, exchangeBaseUrl);
+                macroCandles = candleCacheService.getCandles(
+                    exchangeClient, decryptedKey, decryptedSecret, exchangeSymbol, macroTfParam, 300, exchangeBaseUrl);
+
+                if (trendCandles.isEmpty()) {
+                    log.warn("Bot {} [{}]: failed to fetch {}m candles, falling back to entry-only", bot.getId(), bot.getName(), trendTfParam);
+                }
+                if (macroCandles.isEmpty()) {
+                    log.warn("Bot {} [{}]: failed to fetch {} candles, falling back to entry-only", bot.getId(), bot.getName(), macroTfParam);
+                }
+            }
 
             // Inject order book depth
             double[] depth = streamService.getDepth(exchangeName, exchangeSymbol);
@@ -195,12 +217,13 @@ public class StrategyRunner {
                 params.put("askVolume", depth[1]);
             }
 
-            // --- Evaluate strategy ---
+            // --- Evaluate strategy (multi-TF if available) ---
             TradingStrategy strategy = StrategyFactory.get(bot.getStrategyType());
             params.putIfAbsent("fastEma", bot.getFastEma());
             params.putIfAbsent("slowEma", bot.getSlowEma());
 
-            TradingStrategy.SignalResult signal = strategy.evaluate(closingPrices, candles, params, bot.isHasOpenPosition());
+            TradingStrategy.SignalResult signal = strategy.evaluate(
+                closingPrices, candles, trendCandles, macroCandles, params, bot.isHasOpenPosition());
 
             log.info("Bot {} [{}] exchange={} strategy={} signal={} reason={}",
                 bot.getId(), bot.getName(), exchangeName, bot.getStrategyType(), signal.signal(), signal.reason());
