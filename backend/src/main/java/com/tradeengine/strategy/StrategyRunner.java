@@ -444,13 +444,13 @@ public class StrategyRunner {
             .openedAt(Instant.now())
             .build());
 
-        publisher.publishOrderFilled(bot.getUserId().toString(), order);
-        publisher.publishPositionOpened(bot.getUserId().toString(), position);
-        notificationService.notifyBuy(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+        publisher.publishOrderFilled(freshBot.getUserId().toString(), order);
+        publisher.publishPositionOpened(freshBot.getUserId().toString(), position);
+        notificationService.notifyBuy(freshBot.getUserId().toString(), freshBot.getName(), freshBot.getSymbol(),
             result.getAvgPrice(), result.getExecutedQty());
 
         log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}",
-            bot.getId(), bot.getName(), result.getAvgPrice(), result.getExecutedQty());
+            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty());
     }
 
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
