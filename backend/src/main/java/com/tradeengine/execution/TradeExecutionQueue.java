@@ -288,6 +288,9 @@ public class TradeExecutionQueue {
                         req.getExchange(), req.getSymbol(), req.getSide(),
                         result.getExecutedQty(), result.getOrderId(), result.getAvgPrice(),
                         req.getBotId(), latencyMs);
+
+                    // Trigger post-trade position sync
+                    triggerPostTradeSync();
                 } else {
                     totalFailed.incrementAndGet();
                     log.error("[TRADE_FAILED] exchange={} symbol={} side={} qty={} botId={} error={} latency={}ms",
@@ -296,6 +299,8 @@ public class TradeExecutionQueue {
                 }
 
                 req.getResultFuture().complete(result);
+                log.info("[POSITION_UPDATED] botId={} symbol={} side={} exchange={}",
+                    req.getBotId(), req.getSymbol(), req.getSide(), req.getExchange());
                 Thread.sleep(RATE_LIMIT_DELAY_MS);
 
             } catch (InterruptedException e) {
