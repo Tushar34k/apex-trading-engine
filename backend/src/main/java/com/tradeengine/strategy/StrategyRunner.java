@@ -12,6 +12,7 @@ import com.tradeengine.execution.TradeRequest;
 import com.tradeengine.model.*;
 import com.tradeengine.repository.*;
 import com.tradeengine.service.*;
+import com.tradeengine.service.CandleCacheService;
 import com.tradeengine.ws.MarketDataStreamService;
 import com.tradeengine.ws.TradeEventPublisher;
 import lombok.RequiredArgsConstructor;
