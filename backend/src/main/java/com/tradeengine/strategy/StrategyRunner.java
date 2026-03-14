@@ -426,9 +426,9 @@ public class StrategyRunner {
             : null;
 
         positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
-            .botId(bot.getId())
-            .userId(bot.getUserId())
-            .symbol(bot.getSymbol())
+            .botId(freshBot.getId())
+            .userId(freshBot.getUserId())
+            .symbol(freshBot.getSymbol())
             .exchange(exchangeName)
             .exchangeMode(exchangeMode)
             .entryPrice(result.getAvgPrice())
