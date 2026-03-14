@@ -47,6 +47,7 @@ public class TradeExecutionQueue {
     private final CircuitBreakerService circuitBreaker;
     private final OrderNormalizerService orderNormalizer;
     private final PositionRiskValidator riskValidator;
+    private final PositionSyncService positionSyncService;
     private final BlockingQueue<TradeRequest> queue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean running = new AtomicBoolean(true);
 
