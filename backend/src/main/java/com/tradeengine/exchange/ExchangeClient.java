@@ -76,4 +76,12 @@ public interface ExchangeClient {
      * @return list of open order details as JSON nodes (exchange-specific format)
      */
     List<com.fasterxml.jackson.databind.JsonNode> getOpenOrders(String apiKey, String secret, String symbol, String baseUrl);
+
+    /**
+     * Query the status of a specific order by orderId.
+     * Used for partial fill handling — returns updated executedQty and status.
+     *
+     * @return updated OrderResponse with current fill status
+     */
+    OrderResponse queryOrderStatus(String apiKey, String secret, String symbol, String orderId, String baseUrl);
 }

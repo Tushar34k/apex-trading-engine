@@ -45,8 +45,10 @@ live-trading:
   enabled: ${LIVE_TRADING_ENABLED:false}
 
 risk:
-  maxPositionPercent: ${RISK_MAX_POSITION_PERCENT:20}
-  maxSingleTradePercent: ${RISK_MAX_SINGLE_TRADE_PERCENT:5}
+  maxPositionPercent: ${RISK_MAX_POSITION_PERCENT:10}
+  maxSingleTradePercent: ${RISK_MAX_SINGLE_TRADE_PERCENT:2}
+  maxLeverage: ${RISK_MAX_LEVERAGE:5}
+  liquidationSafetyPercent: ${RISK_LIQUIDATION_SAFETY_PERCENT:5}
 
 symbols:
   mappings:
