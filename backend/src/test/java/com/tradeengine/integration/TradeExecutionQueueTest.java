@@ -278,7 +278,7 @@ class TradeExecutionQueueTest {
                 .quantity(new BigDecimal("0")).price(new BigDecimal("65000"))
                 .valid(false).validationMessage("Quantity below minQty").build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
