@@ -646,4 +646,9 @@ public class StrategyRunner {
             return new HashMap<>();
         }
     }
+
+    private double getDoubleParam(Map<String, Object> params, String key, double defaultVal) {
+        Object val = params.get(key);
+        return val instanceof Number ? ((Number) val).doubleValue() : defaultVal;
+    }
 }
