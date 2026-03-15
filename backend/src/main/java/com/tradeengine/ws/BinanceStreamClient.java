@@ -240,6 +240,66 @@ public class BinanceStreamClient {
         }
     }
 
+    /**
+     * Detect dead WebSocket streams and force reconnect.
+     * A stream is considered dead if no messages received for 30+ seconds.
+     */
+    private void checkStreamHealth() {
+        long now = System.currentTimeMillis();
+        for (String sym : subscribedSymbols) {
+            Long lastMsg = lastMessageTime.get(sym);
+            if (lastMsg != null && (now - lastMsg) > DEAD_STREAM_THRESHOLD_MS) {
+                log.error("[STREAM_HEALTH] DEAD stream detected for {} — no messages for {}ms. Forcing reconnect.",
+                    sym, now - lastMsg);
+
+                // Force close and reconnect
+                WebSocket ws = activeConnections.remove(sym);
+                if (ws != null) {
+                    try { ws.sendClose(WebSocket.NORMAL_CLOSURE, "health-check-reconnect"); }
+                    catch (Exception ignored) {}
+                }
+
+                // Clear stale price data
+                String upper = sym.toUpperCase();
+                priceCache.remove(upper);
+                priceTimestamps.remove(upper);
+
+                // Trigger reconnect
+                boolean testnet = activeConnections.containsKey(sym + "_testnet");
+                String streams = sym + "@trade/" + sym + "@kline_1m/" + sym + "@kline_5m/"
+                    + sym + "@kline_15m/" + sym + "@kline_1h/" + sym + "@depth20@100ms";
+                String wsUrl = (testnet ? TESTNET_WS_BASE : WS_BASE) + streams;
+                connectWebSocket(sym, wsUrl);
+            } else if (lastMsg == null && activeConnections.containsKey(sym)) {
+                // Stream connected but never received a message — may be stuck
+                log.warn("[STREAM_HEALTH] Stream {} connected but no messages received yet", sym);
+            }
+        }
+    }
+
+    /**
+     * Get stream health metrics for monitoring dashboard.
+     */
+    public Map<String, Object> getStreamHealth() {
+        Map<String, Object> health = new HashMap<>();
+        long now = System.currentTimeMillis();
+
+        for (String sym : subscribedSymbols) {
+            Map<String, Object> symHealth = new HashMap<>();
+            symHealth.put("connected", activeConnections.containsKey(sym));
+            Long lastMsg = lastMessageTime.get(sym);
+            symHealth.put("lastMessageMs", lastMsg != null ? now - lastMsg : -1);
+            symHealth.put("totalMessages", messageCounters.getOrDefault(sym, 0L));
+            symHealth.put("priceFresh", isPriceFresh(sym.toUpperCase()));
+            symHealth.put("latestPrice", priceCache.get(sym.toUpperCase()));
+            health.put(sym, symHealth);
+        }
+
+        health.put("activeStreams", activeConnections.size());
+        health.put("subscribedSymbols", subscribedSymbols.size());
+        return health;
+    }
+
     private void scheduleReconnect(String sym, String wsUrl) {
         if (!subscribedSymbols.contains(sym)) return;
         reconnectExecutor.schedule(() -> {
@@ -254,6 +314,7 @@ public class BinanceStreamClient {
         activeConnections.values().forEach(ws -> ws.sendClose(WebSocket.NORMAL_CLOSURE, "shutdown"));
         activeConnections.clear();
         reconnectExecutor.shutdown();
+        healthMonitor.shutdown();
         log.info("[Stream] All connections closed");
     }
 }
