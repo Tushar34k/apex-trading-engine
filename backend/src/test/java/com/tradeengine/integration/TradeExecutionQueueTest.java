@@ -8,6 +8,8 @@ import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
 import com.tradeengine.service.OrderNormalizerService;
 import com.tradeengine.service.PositionRiskValidator;
+import com.tradeengine.service.PositionSyncService;
+import com.tradeengine.service.PositionTracker;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
 
