@@ -45,8 +45,10 @@ public class KillSwitchService {
     private volatile double maxDailyLossPercent = 5.0;
     private volatile double maxTotalExposureUsdt = 100_000.0;
     private volatile int maxExchangeErrorsPerMinute = 5;
+    private volatile int maxConsecutiveFailures = 5;
 
     private final ConcurrentLinkedQueue<Instant> recentErrors = new ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.atomic.AtomicInteger consecutiveFailures = new java.util.concurrent.atomic.AtomicInteger(0);
 
     public KillSwitchService(BotRepository botRepo, NotificationService notificationService,
                              @Lazy TradeExecutionQueue executionQueue) {
