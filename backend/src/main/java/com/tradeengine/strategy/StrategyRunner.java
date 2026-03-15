@@ -434,12 +434,13 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
+        final BigDecimal triggerPrice = currentPrice;
         request.getResultFuture()
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
                     killSwitch.recordTradeSuccess();
-                    handleSellFilled(bot, result, notificationType);
+                    handleSellFilled(bot, result, notificationType, triggerPrice);
                 } else {
                     log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
                     killSwitch.recordTradeFailure();
