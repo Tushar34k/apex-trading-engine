@@ -195,6 +195,8 @@ public class BinanceStreamClient {
                 double price = data.get("p").asDouble();
                 priceCache.put(symbol, price);
                 priceTimestamps.put(symbol, System.currentTimeMillis());
+                lastMessageTime.put(sym, System.currentTimeMillis());
+                messageCounters.merge(sym, 1L, Long::sum);
                 if (priceUpdateListener != null) {
                     priceUpdateListener.accept(symbol, price);
                 }
