@@ -434,12 +434,13 @@ public class StrategyRunner {
 
         executionQueue.submitTrade(request);
 
+        final BigDecimal triggerPrice = currentPrice;
         request.getResultFuture()
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
                     killSwitch.recordTradeSuccess();
-                    handleSellFilled(bot, result, notificationType);
+                    handleSellFilled(bot, result, notificationType, triggerPrice);
                 } else {
                     log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
                     killSwitch.recordTradeFailure();
@@ -563,6 +564,7 @@ public class StrategyRunner {
             .botId(freshBot.getId())
             .userId(freshBot.getUserId())
             .symbol(freshBot.getSymbol())
+            .side("LONG")
             .exchange(exchangeName)
             .exchangeMode(exchangeMode)
             .entryPrice(result.getAvgPrice())
@@ -588,7 +590,7 @@ public class StrategyRunner {
             slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP));
     }
 
-    private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
+    private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType, BigDecimal currentPrice) {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
@@ -606,16 +608,15 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        // --- Slippage guard ---
+        // --- Slippage guard (compare fill price to the current market price that triggered the exit) ---
         PositionTracker.TrackedPosition trackedPos = positionTracker.getPosition(freshBot.getId()).orElse(null);
-        if (trackedPos != null && trackedPos.getEntryPrice() != null && result.getAvgPrice() != null) {
-            BigDecimal expectedPrice = trackedPos.getEntryPrice();
-            BigDecimal slippage = result.getAvgPrice().subtract(expectedPrice).abs()
-                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+        if (result.getAvgPrice() != null && currentPrice != null && currentPrice.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal slippage = result.getAvgPrice().subtract(currentPrice).abs()
+                .divide(currentPrice, 6, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100));
             if (slippage.doubleValue() > 0.5) {
-                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
-                    freshBot.getId(), freshBot.getSymbol(), expectedPrice, result.getAvgPrice(), slippage);
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} triggerPrice={} fillPrice={} slippage={}%",
+                    freshBot.getId(), freshBot.getSymbol(), currentPrice, result.getAvgPrice(), slippage);
             }
         }
 

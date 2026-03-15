@@ -142,6 +142,9 @@ public class PositionSyncService {
                 "botId={} symbol={} internalQty={}. Exchange shows no position. Marking CLOSED.",
                 bot.getId(), exchangeSymbol, internal.getQuantity());
 
+            // Cancel orphan exchange-side SL/TP orders BEFORE removing internal state
+            cancelOrphanOrders(bot, internal, exchangeName, exchangeSymbol, apiKey, secret, baseUrl);
+
             positionTracker.removePosition(bot.getId());
 
             // Update bot state
@@ -168,6 +171,7 @@ public class PositionSyncService {
                 .botId(bot.getId())
                 .userId(bot.getUserId())
                 .symbol(exchangeSymbol)
+                .side(external.getSide()) // preserve LONG/SHORT from exchange
                 .exchange(exchangeName)
                 .exchangeMode(bot.getExchangeMode())
                 .entryPrice(external.getEntryPrice())
@@ -206,6 +210,7 @@ public class PositionSyncService {
                     .botId(bot.getId())
                     .userId(bot.getUserId())
                     .symbol(internal.getSymbol())
+                    .side(internal.getSide() != null ? internal.getSide() : external.getSide())
                     .exchange(internal.getExchange())
                     .exchangeMode(internal.getExchangeMode())
                     .entryPrice(external.getEntryPrice())
@@ -235,6 +240,44 @@ public class PositionSyncService {
 
         // Both null — no action needed
     }
+
+    /**
+     * Cancel orphan exchange-side SL/TP orders when position sync detects a phantom position.
+     * This prevents orphan STOP_MARKET/TAKE_PROFIT_MARKET orders from triggering on future positions.
+     */
+    private void cancelOrphanOrders(TradingBot bot, PositionTracker.TrackedPosition internal,
+                                     String exchangeName, String exchangeSymbol,
+                                     String apiKey, String secret, String baseUrl) {
+        try {
+            ExchangeClient client = exchangeFactory.getClient(exchangeName);
+            List<com.fasterxml.jackson.databind.JsonNode> openOrders = client.getOpenOrders(
+                apiKey, secret, exchangeSymbol, baseUrl);
+
+            int cancelled = 0;
+            for (com.fasterxml.jackson.databind.JsonNode order : openOrders) {
+                String type = order.path("type").asText("");
+                if ("STOP_MARKET".equals(type) || "TAKE_PROFIT_MARKET".equals(type)) {
+                    String orderId = order.path("orderId").asText();
+                    try {
+                        client.cancelOrder(apiKey, secret, exchangeSymbol, orderId, baseUrl);
+                        cancelled++;
+                        log.info("[POSITION_SYNC_ORPHAN_CANCELLED] botId={} symbol={} type={} orderId={}",
+                            bot.getId(), exchangeSymbol, type, orderId);
+                    } catch (Exception e) {
+                        log.warn("[POSITION_SYNC_ORPHAN_CANCEL_FAILED] botId={} orderId={} error={}",
+                            bot.getId(), orderId, e.getMessage());
+                    }
+                }
+            }
+            if (cancelled > 0) {
+                log.info("[POSITION_SYNC_ORPHAN_CLEANUP] botId={} cancelled {} orphan protective orders",
+                    bot.getId(), cancelled);
+            }
+        } catch (Exception e) {
+            log.error("[POSITION_SYNC_ORPHAN_CLEANUP_FAILED] botId={} error={}", bot.getId(), e.getMessage());
+        }
+    }
+
 
     /**
      * One-time startup recovery: rebuild PositionTracker from exchange state.
@@ -290,6 +333,7 @@ public class PositionSyncService {
                             .botId(bot.getId())
                             .userId(bot.getUserId())
                             .symbol(exchangeSymbol)
+                            .side(ep.getSide()) // preserve LONG/SHORT from exchange
                             .exchange(exchangeName)
                             .exchangeMode(bot.getExchangeMode())
                             .entryPrice(ep.getEntryPrice())

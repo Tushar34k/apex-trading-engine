@@ -54,11 +54,19 @@ public class PositionRiskManager {
         // Update price extremes
         positionTracker.updatePriceExtremes(pos.getBotId(), currentPrice);
 
+        boolean isShort = "SHORT".equalsIgnoreCase(pos.getSide());
+
         // --- Stop Loss ---
         if (pos.getStopLossPrice() != null) {
-            if (currentPrice.compareTo(pos.getStopLossPrice()) <= 0) {
-                log.warn("[POSITION_CLOSED] reason=STOP_LOSS botId={} symbol={} price={} stopLoss={}",
-                    pos.getBotId(), pos.getSymbol(), currentPrice, pos.getStopLossPrice());
+            // LONG: SL triggers when price falls below stop → currentPrice <= SL
+            // SHORT: SL triggers when price rises above stop → currentPrice >= SL
+            boolean slTriggered = isShort
+                ? currentPrice.compareTo(pos.getStopLossPrice()) >= 0
+                : currentPrice.compareTo(pos.getStopLossPrice()) <= 0;
+
+            if (slTriggered) {
+                log.warn("[POSITION_CLOSED] reason=STOP_LOSS botId={} symbol={} side={} price={} stopLoss={}",
+                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getStopLossPrice());
                 submitExitOrder(pos, "BOT_SL");
                 return;
             }
@@ -66,9 +74,15 @@ public class PositionRiskManager {
 
         // --- Take Profit ---
         if (pos.getTakeProfitPrice() != null) {
-            if (currentPrice.compareTo(pos.getTakeProfitPrice()) >= 0) {
-                log.info("[POSITION_CLOSED] reason=TAKE_PROFIT botId={} symbol={} price={} takeProfit={}",
-                    pos.getBotId(), pos.getSymbol(), currentPrice, pos.getTakeProfitPrice());
+            // LONG: TP triggers when price rises above target → currentPrice >= TP
+            // SHORT: TP triggers when price falls below target → currentPrice <= TP
+            boolean tpTriggered = isShort
+                ? currentPrice.compareTo(pos.getTakeProfitPrice()) <= 0
+                : currentPrice.compareTo(pos.getTakeProfitPrice()) >= 0;
+
+            if (tpTriggered) {
+                log.info("[POSITION_CLOSED] reason=TAKE_PROFIT botId={} symbol={} side={} price={} takeProfit={}",
+                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getTakeProfitPrice());
                 submitExitOrder(pos, "BOT_TP");
                 return;
             }
@@ -96,11 +110,14 @@ public class PositionRiskManager {
         // to preserve tracking if the trade fails
         positionTracker.removePosition(pos.getBotId());
 
+        // LONG positions exit with SELL, SHORT positions exit with BUY
+        String exitSide = "SHORT".equalsIgnoreCase(pos.getSide()) ? "BUY" : "SELL";
+
         TradeRequest request = TradeRequest.builder()
             .botId(pos.getBotId())
             .userId(pos.getUserId())
             .symbol(pos.getSymbol())
-            .side("SELL")
+            .side(exitSide)
             .quantity(pos.getQuantity())
             .orderType("MARKET")
             .apiKey(pos.getApiKey())
