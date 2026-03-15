@@ -113,7 +113,7 @@ class TradeExecutionQueueTest {
         when(killSwitch.isActive()).thenReturn(true);
         when(killSwitch.getActivationReason()).thenReturn("Test kill");
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
