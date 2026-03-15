@@ -207,7 +207,7 @@ class TradeExecutionQueueTest {
     @Test
     @DisplayName("Validation rejects invalid request")
     void validationRejectsInvalid() throws Exception {
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         TradeRequest invalid = TradeRequest.builder()
             .botId(UUID.randomUUID()).userId(UUID.randomUUID())
