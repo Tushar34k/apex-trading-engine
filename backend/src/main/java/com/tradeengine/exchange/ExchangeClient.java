@@ -84,4 +84,31 @@ public interface ExchangeClient {
      * @return updated OrderResponse with current fill status
      */
     OrderResponse queryOrderStatus(String apiKey, String secret, String symbol, String orderId, String baseUrl);
+
+    /**
+     * Place a STOP_MARKET order (exchange-side stop loss).
+     * Must be reduceOnly to only close existing positions.
+     *
+     * @param stopPrice the trigger price for the stop
+     * @return order response from the exchange
+     */
+    OrderResponse placeStopMarketOrder(String apiKey, String secret, String symbol,
+                                        String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl);
+
+    /**
+     * Place a TAKE_PROFIT_MARKET order (exchange-side take profit).
+     * Must be reduceOnly to only close existing positions.
+     *
+     * @param stopPrice the trigger price for the take profit
+     * @return order response from the exchange
+     */
+    OrderResponse placeTakeProfitMarketOrder(String apiKey, String secret, String symbol,
+                                              String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl);
+
+    /**
+     * Fetch the current funding rate for a symbol.
+     *
+     * @return funding rate as a decimal (e.g. 0.0001 = 0.01%), or null if unavailable
+     */
+    BigDecimal getFundingRate(String symbol, String baseUrl);
 }
