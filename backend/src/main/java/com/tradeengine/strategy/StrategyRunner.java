@@ -246,6 +246,7 @@ public class StrategyRunner {
                     double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
                     params.put("takeProfitPercent", tpPercent);
                 }
+                params.put("__signalPrice", signal.price());
                 submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient, exchangeSymbol);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
@@ -496,6 +497,19 @@ public class StrategyRunner {
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
 
+        // --- Slippage guard on entry ---
+        BigDecimal expectedPrice = BigDecimal.valueOf(
+            params.containsKey("__signalPrice") ? ((Number) params.get("__signalPrice")).doubleValue() : 0);
+        if (expectedPrice.compareTo(BigDecimal.ZERO) > 0 && result.getAvgPrice() != null) {
+            BigDecimal entrySlippage = result.getAvgPrice().subtract(expectedPrice).abs()
+                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+            if (entrySlippage.doubleValue() > 0.5) {
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
+                    freshBot.getId(), exchangeSymbol, expectedPrice, result.getAvgPrice(), entrySlippage);
+            }
+        }
+
         // --- Calculate SL/TP prices ---
         double defaultSlPercent = 0.7;
         double defaultTpPercent = 1.4;
@@ -513,6 +527,13 @@ public class StrategyRunner {
             ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
             : null;
 
+        // Round SL/TP to exchange tick size (not hardcoded 2dp)
+        SymbolInfo symInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
+        if (symInfo != null) {
+            slPrice = symInfo.roundPrice(slPrice);
+            tpPrice = symInfo.roundPrice(tpPrice);
+        }
+
         // --- Place exchange-side protective orders (STOP_MARKET + TAKE_PROFIT_MARKET) ---
         try {
             ExchangeClient client = exchangeFactory.getClient(exchangeName);
@@ -520,16 +541,16 @@ public class StrategyRunner {
             // STOP_MARKET for stop loss (reduceOnly=true built into the method)
             OrderResponse slOrder = client.placeStopMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
-                result.getExecutedQty(), slPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+                result.getExecutedQty(), slPrice, exchangeBaseUrl);
             log.info("[STOP_LOSS_PLACED] botId={} symbol={} stopPrice={} orderId={}",
-                freshBot.getId(), exchangeSymbol, slPrice.setScale(2, RoundingMode.HALF_UP), slOrder.getOrderId());
+                freshBot.getId(), exchangeSymbol, slPrice, slOrder.getOrderId());
 
             // TAKE_PROFIT_MARKET for take profit (reduceOnly=true built into the method)
             OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
-                result.getExecutedQty(), tpPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+                result.getExecutedQty(), tpPrice, exchangeBaseUrl);
             log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} stopPrice={} orderId={}",
-                freshBot.getId(), exchangeSymbol, tpPrice.setScale(2, RoundingMode.HALF_UP), tpOrder.getOrderId());
+                freshBot.getId(), exchangeSymbol, tpPrice, tpOrder.getOrderId());
 
         } catch (Exception e) {
             log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",
@@ -585,6 +606,19 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
+        // --- Slippage guard ---
+        PositionTracker.TrackedPosition trackedPos = positionTracker.getPosition(freshBot.getId()).orElse(null);
+        if (trackedPos != null && trackedPos.getEntryPrice() != null && result.getAvgPrice() != null) {
+            BigDecimal expectedPrice = trackedPos.getEntryPrice();
+            BigDecimal slippage = result.getAvgPrice().subtract(expectedPrice).abs()
+                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+            if (slippage.doubleValue() > 0.5) {
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
+                    freshBot.getId(), freshBot.getSymbol(), expectedPrice, result.getAvgPrice(), slippage);
+            }
+        }
+
         BigDecimal pnl = BigDecimal.ZERO;
         if (freshBot.getEntryPrice() != null) {
             pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(freshBot.getQuantity());
@@ -601,6 +635,9 @@ public class StrategyRunner {
             positionRepo.save(position);
             publisher.publishPositionClosed(freshBot.getUserId().toString(), position, pnl);
         }
+
+        // --- Cancel orphan exchange-side SL/TP orders ---
+        cancelOrphanProtectiveOrders(freshBot, trackedPos);
 
         freshBot.setHasOpenPosition(false);
         freshBot.setEntryPrice(null);
@@ -622,6 +659,44 @@ public class StrategyRunner {
 
         log.info("Bot {} [{}]: SELL filled via queue. Exit={}, PnL={}",
             freshBot.getId(), freshBot.getName(), result.getAvgPrice(), pnl);
+    }
+
+    /**
+     * Cancel all open STOP_MARKET and TAKE_PROFIT_MARKET orders for a symbol when a position closes.
+     * Prevents orphan protective orders from triggering on future positions.
+     */
+    private void cancelOrphanProtectiveOrders(TradingBot bot, PositionTracker.TrackedPosition trackedPos) {
+        if (trackedPos == null) return;
+
+        try {
+            ExchangeClient client = exchangeFactory.getClient(trackedPos.getExchange());
+            String exchangeSymbol = symbolMapper.resolveSymbol(trackedPos.getExchange(), bot.getSymbol());
+
+            List<com.fasterxml.jackson.databind.JsonNode> openOrders = client.getOpenOrders(
+                trackedPos.getApiKey(), trackedPos.getApiSecret(), exchangeSymbol, trackedPos.getExchangeBaseUrl());
+
+            int cancelled = 0;
+            for (com.fasterxml.jackson.databind.JsonNode order : openOrders) {
+                String type = order.path("type").asText("");
+                if ("STOP_MARKET".equals(type) || "TAKE_PROFIT_MARKET".equals(type)) {
+                    String orderId = order.path("orderId").asText();
+                    try {
+                        client.cancelOrder(trackedPos.getApiKey(), trackedPos.getApiSecret(),
+                            exchangeSymbol, orderId, trackedPos.getExchangeBaseUrl());
+                        cancelled++;
+                        log.info("[ORPHAN_ORDER_CANCELLED] botId={} symbol={} type={} orderId={}",
+                            bot.getId(), exchangeSymbol, type, orderId);
+                    } catch (Exception e) {
+                        log.warn("[ORPHAN_ORDER_CANCEL_FAILED] botId={} orderId={} error={}", bot.getId(), orderId, e.getMessage());
+                    }
+                }
+            }
+            if (cancelled > 0) {
+                log.info("[ORPHAN_CLEANUP] botId={} symbol={} cancelled {} protective orders", bot.getId(), exchangeSymbol, cancelled);
+            }
+        } catch (Exception e) {
+            log.error("[ORPHAN_CLEANUP_FAILED] botId={} error={} — manual cleanup may be required", bot.getId(), e.getMessage());
+        }
     }
 
     private String resolveExchangeUrl(String exchangeMode, ExchangeClient exchangeClient) {

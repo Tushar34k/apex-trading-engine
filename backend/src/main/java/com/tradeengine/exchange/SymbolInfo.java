@@ -28,7 +28,16 @@ public class SymbolInfo {
     }
 
     /**
-     * Validate quantity against Binance LOT_SIZE and MIN_NOTIONAL rules.
+     * Round price DOWN to comply with tickSize.
+     */
+    public BigDecimal roundPrice(BigDecimal price) {
+        if (tickSize == null || tickSize.compareTo(BigDecimal.ZERO) == 0) return price;
+        BigDecimal remainder = price.remainder(tickSize);
+        return price.subtract(remainder);
+    }
+
+    /**
+     * Validate quantity against exchange LOT_SIZE and MIN_NOTIONAL rules.
      * Returns null if valid, or an error message if invalid.
      */
     public String validate(BigDecimal quantity, BigDecimal price) {
