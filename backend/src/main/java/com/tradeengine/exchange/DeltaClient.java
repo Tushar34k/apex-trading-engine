@@ -533,4 +533,22 @@ public class DeltaClient implements ExchangeClient {
             default -> 60;
         };
     }
+
+    @Override
+    public OrderResponse placeStopMarketOrder(String apiKey, String secret, String symbol,
+                                               String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        throw new UnsupportedOperationException("Delta STOP_MARKET not yet implemented — use PositionRiskManager fallback");
+    }
+
+    @Override
+    public OrderResponse placeTakeProfitMarketOrder(String apiKey, String secret, String symbol,
+                                                      String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        throw new UnsupportedOperationException("Delta TAKE_PROFIT_MARKET not yet implemented — use PositionRiskManager fallback");
+    }
+
+    @Override
+    public BigDecimal getFundingRate(String symbol, String baseUrl) {
+        log.warn("[DELTA] getFundingRate not yet implemented for {}", symbol);
+        return null;
+    }
 }

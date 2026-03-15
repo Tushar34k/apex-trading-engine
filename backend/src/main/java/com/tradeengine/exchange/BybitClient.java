@@ -538,4 +538,22 @@ public class BybitClient implements ExchangeClient {
             default -> bybitStatus.toUpperCase();
         };
     }
+
+    @Override
+    public OrderResponse placeStopMarketOrder(String apiKey, String secret, String symbol,
+                                               String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        throw new UnsupportedOperationException("Bybit STOP_MARKET not yet implemented — use PositionRiskManager fallback");
+    }
+
+    @Override
+    public OrderResponse placeTakeProfitMarketOrder(String apiKey, String secret, String symbol,
+                                                      String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        throw new UnsupportedOperationException("Bybit TAKE_PROFIT_MARKET not yet implemented — use PositionRiskManager fallback");
+    }
+
+    @Override
+    public BigDecimal getFundingRate(String symbol, String baseUrl) {
+        log.warn("[BYBIT] getFundingRate not yet implemented for {}", symbol);
+        return null;
+    }
 }
