@@ -171,6 +171,7 @@ public class PositionSyncService {
                 .botId(bot.getId())
                 .userId(bot.getUserId())
                 .symbol(exchangeSymbol)
+                .side(external.getSide()) // preserve LONG/SHORT from exchange
                 .exchange(exchangeName)
                 .exchangeMode(bot.getExchangeMode())
                 .entryPrice(external.getEntryPrice())
