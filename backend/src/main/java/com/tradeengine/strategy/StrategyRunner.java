@@ -590,7 +590,7 @@ public class StrategyRunner {
             slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP));
     }
 
-    private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
+    private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType, BigDecimal currentPrice) {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
