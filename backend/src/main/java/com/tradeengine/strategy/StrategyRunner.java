@@ -246,6 +246,7 @@ public class StrategyRunner {
                     double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
                     params.put("takeProfitPercent", tpPercent);
                 }
+                params.put("__signalPrice", signal.price());
                 submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient, exchangeSymbol);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
