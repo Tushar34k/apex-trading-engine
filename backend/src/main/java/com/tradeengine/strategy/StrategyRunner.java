@@ -458,7 +458,7 @@ public class StrategyRunner {
     private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result,
                                    String apiKey, String apiSecret,
                                    String exchangeName, String exchangeMode, String exchangeBaseUrl,
-                                   Map<String, Object> params) {
+                                   Map<String, Object> params, String exchangeSymbol) {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
@@ -475,6 +475,9 @@ public class StrategyRunner {
         order.setStatus("FILLED");
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
+
+        log.info("[TRADE_EXECUTED] botId={} symbol={} side=BUY qty={} avgPrice={} orderId={}",
+            freshBot.getId(), exchangeSymbol, result.getExecutedQty(), result.getAvgPrice(), result.getOrderId());
 
         freshBot.setHasOpenPosition(true);
         freshBot.setEntryPrice(result.getAvgPrice());
@@ -493,19 +496,48 @@ public class StrategyRunner {
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
 
-        // Register with PositionTracker for real-time risk monitoring
+        // --- Calculate SL/TP prices ---
+        double defaultSlPercent = 0.7;
+        double defaultTpPercent = 1.4;
         BigDecimal slPrice = params.containsKey("stopLossPercent")
             ? result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
                 BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)))
-            : null;
+            : result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
+                BigDecimal.valueOf(defaultSlPercent / 100)));
         BigDecimal tpPrice = params.containsKey("takeProfitPercent")
             ? result.getAvgPrice().multiply(BigDecimal.ONE.add(
                 BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)))
-            : null;
+            : result.getAvgPrice().multiply(BigDecimal.ONE.add(
+                BigDecimal.valueOf(defaultTpPercent / 100)));
         BigDecimal trailingPct = params.containsKey("trailingStopPercent")
             ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
             : null;
 
+        // --- Place exchange-side protective orders (STOP_MARKET + TAKE_PROFIT_MARKET) ---
+        try {
+            ExchangeClient client = exchangeFactory.getClient(exchangeName);
+
+            // STOP_MARKET for stop loss (reduceOnly=true built into the method)
+            OrderResponse slOrder = client.placeStopMarketOrder(
+                apiKey, apiSecret, exchangeSymbol, "SELL",
+                result.getExecutedQty(), slPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+            log.info("[STOP_LOSS_PLACED] botId={} symbol={} stopPrice={} orderId={}",
+                freshBot.getId(), exchangeSymbol, slPrice.setScale(2, RoundingMode.HALF_UP), slOrder.getOrderId());
+
+            // TAKE_PROFIT_MARKET for take profit (reduceOnly=true built into the method)
+            OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
+                apiKey, apiSecret, exchangeSymbol, "SELL",
+                result.getExecutedQty(), tpPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+            log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} stopPrice={} orderId={}",
+                freshBot.getId(), exchangeSymbol, tpPrice.setScale(2, RoundingMode.HALF_UP), tpOrder.getOrderId());
+
+        } catch (Exception e) {
+            log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",
+                freshBot.getId(), exchangeSymbol, e.getMessage());
+            // Fall back to internal monitoring — PositionRiskManager will still watch this position
+        }
+
+        // Register with PositionTracker for real-time risk monitoring (backup to exchange orders)
         positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
             .botId(freshBot.getId())
             .userId(freshBot.getUserId())
@@ -530,8 +562,9 @@ public class StrategyRunner {
         notificationService.notifyBuy(freshBot.getUserId().toString(), freshBot.getName(), freshBot.getSymbol(),
             result.getAvgPrice(), result.getExecutedQty());
 
-        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}",
-            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty());
+        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}, SL={}, TP={}",
+            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty(),
+            slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP));
     }
 
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
