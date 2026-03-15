@@ -142,6 +142,9 @@ public class PositionSyncService {
                 "botId={} symbol={} internalQty={}. Exchange shows no position. Marking CLOSED.",
                 bot.getId(), exchangeSymbol, internal.getQuantity());
 
+            // Cancel orphan exchange-side SL/TP orders BEFORE removing internal state
+            cancelOrphanOrders(bot, internal, exchangeName, exchangeSymbol, apiKey, secret, baseUrl);
+
             positionTracker.removePosition(bot.getId());
 
             // Update bot state

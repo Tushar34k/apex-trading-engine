@@ -26,6 +26,7 @@ public class PositionTracker {
         private final UUID botId;
         private final UUID userId;
         private final String symbol;
+        private final String side; // "LONG" or "SHORT" — critical for SL/TP direction
         private final String exchange;
         private final String exchangeMode;
         private final BigDecimal entryPrice;

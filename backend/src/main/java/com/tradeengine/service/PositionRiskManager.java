@@ -110,11 +110,14 @@ public class PositionRiskManager {
         // to preserve tracking if the trade fails
         positionTracker.removePosition(pos.getBotId());
 
+        // LONG positions exit with SELL, SHORT positions exit with BUY
+        String exitSide = "SHORT".equalsIgnoreCase(pos.getSide()) ? "BUY" : "SELL";
+
         TradeRequest request = TradeRequest.builder()
             .botId(pos.getBotId())
             .userId(pos.getUserId())
             .symbol(pos.getSymbol())
-            .side("SELL")
+            .side(exitSide)
             .quantity(pos.getQuantity())
             .orderType("MARKET")
             .apiKey(pos.getApiKey())

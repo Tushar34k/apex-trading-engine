@@ -607,16 +607,15 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        // --- Slippage guard ---
+        // --- Slippage guard (compare fill price to the current market price that triggered the exit) ---
         PositionTracker.TrackedPosition trackedPos = positionTracker.getPosition(freshBot.getId()).orElse(null);
-        if (trackedPos != null && trackedPos.getEntryPrice() != null && result.getAvgPrice() != null) {
-            BigDecimal expectedPrice = trackedPos.getEntryPrice();
-            BigDecimal slippage = result.getAvgPrice().subtract(expectedPrice).abs()
-                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+        if (result.getAvgPrice() != null && currentPrice != null && currentPrice.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal slippage = result.getAvgPrice().subtract(currentPrice).abs()
+                .divide(currentPrice, 6, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100));
             if (slippage.doubleValue() > 0.5) {
-                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
-                    freshBot.getId(), freshBot.getSymbol(), expectedPrice, result.getAvgPrice(), slippage);
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} triggerPrice={} fillPrice={} slippage={}%",
+                    freshBot.getId(), freshBot.getSymbol(), currentPrice, result.getAvgPrice(), slippage);
             }
         }
 
