@@ -57,9 +57,11 @@ class StressTest {
         symbolRegistry = mock(ExchangeSymbolRegistry.class);
         orderNormalizer = new OrderNormalizerService(symbolRegistry);
 
-        riskValidator = new PositionRiskValidator();
+        PositionTracker positionTracker = new PositionTracker();
+        riskValidator = new PositionRiskValidator(positionTracker);
         riskValidator.setMaxPositionPercent(20);
         riskValidator.setMaxSingleTradePercent(5);
+        riskValidator.setMaxGlobalOpenPositions(100);
 
         // Default: balance of 100,000 USDT (high enough for most tests)
         when(mockClient.getBalances(anyString(), anyString(), anyString()))
@@ -71,7 +73,8 @@ class StressTest {
                 .orderId("ORD-OK").symbol("BTCUSDT").side("BUY").status("FILLED")
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("65000")).build());
 
-        queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        PositionSyncService positionSyncService = mock(PositionSyncService.class);
+        queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
     }
 
     @AfterEach

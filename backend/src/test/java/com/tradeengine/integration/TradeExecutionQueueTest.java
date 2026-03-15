@@ -63,7 +63,9 @@ class TradeExecutionQueueTest {
                 .quantity(inv.getArgument(2)).price(inv.getArgument(3))
                 .valid(true).build());
 
-        riskValidator = new PositionRiskValidator();
+        PositionTracker positionTracker = new PositionTracker();
+        riskValidator = new PositionRiskValidator(positionTracker);
+        riskValidator.setMaxGlobalOpenPositions(100);
     }
 
     private TradeRequest buildRequest(String side) {
