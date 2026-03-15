@@ -519,6 +519,117 @@ public class BinanceClient implements ExchangeClient {
         }
     }
 
+    @Override
+    public OrderResponse placeStopMarketOrder(String apiKey, String secret, String symbol,
+                                               String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        String base = resolveBase(baseUrl);
+        String endpoint = "/fapi/v1/order";
+
+        long timestamp = System.currentTimeMillis();
+        String params = buildQueryString(
+            "symbol", symbol,
+            "side", side.toUpperCase(),
+            "type", "STOP_MARKET",
+            "stopPrice", stopPrice.toPlainString(),
+            "quantity", quantity.toPlainString(),
+            "reduceOnly", "true",
+            "recvWindow", String.valueOf(recvWindow),
+            "timestamp", String.valueOf(timestamp)
+        );
+
+        String signed = appendSignature(params, secret);
+        String url = base + endpoint + "?" + signed;
+
+        log.info("[BINANCE] POST {} STOP_MARKET symbol={} side={} stopPrice={} qty={}", endpoint, symbol, side, stopPrice, quantity);
+
+        try {
+            String body = post(url, apiKey);
+            log.info("[BINANCE] STOP_MARKET response={}", body);
+
+            JsonNode node = parseAndValidate(body);
+            OrderResponse resp = OrderResponse.builder()
+                .orderId(node.get("orderId").asText())
+                .symbol(node.get("symbol").asText())
+                .side(node.get("side").asText())
+                .status(node.get("status").asText())
+                .executedQty(BigDecimal.ZERO)
+                .avgPrice(stopPrice)
+                .build();
+
+            log.info("[STOP_LOSS_PLACED] symbol={} side={} stopPrice={} orderId={}", symbol, side, stopPrice, resp.getOrderId());
+            return resp;
+        } catch (Exception e) {
+            log.error("[BINANCE] STOP_MARKET order failed: symbol={} side={} stopPrice={} error={}", symbol, side, stopPrice, e.getMessage());
+            throw new RuntimeException("Binance STOP_MARKET order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public OrderResponse placeTakeProfitMarketOrder(String apiKey, String secret, String symbol,
+                                                      String side, BigDecimal quantity, BigDecimal stopPrice, String baseUrl) {
+        String base = resolveBase(baseUrl);
+        String endpoint = "/fapi/v1/order";
+
+        long timestamp = System.currentTimeMillis();
+        String params = buildQueryString(
+            "symbol", symbol,
+            "side", side.toUpperCase(),
+            "type", "TAKE_PROFIT_MARKET",
+            "stopPrice", stopPrice.toPlainString(),
+            "quantity", quantity.toPlainString(),
+            "reduceOnly", "true",
+            "recvWindow", String.valueOf(recvWindow),
+            "timestamp", String.valueOf(timestamp)
+        );
+
+        String signed = appendSignature(params, secret);
+        String url = base + endpoint + "?" + signed;
+
+        log.info("[BINANCE] POST {} TAKE_PROFIT_MARKET symbol={} side={} stopPrice={} qty={}", endpoint, symbol, side, stopPrice, quantity);
+
+        try {
+            String body = post(url, apiKey);
+            log.info("[BINANCE] TAKE_PROFIT_MARKET response={}", body);
+
+            JsonNode node = parseAndValidate(body);
+            OrderResponse resp = OrderResponse.builder()
+                .orderId(node.get("orderId").asText())
+                .symbol(node.get("symbol").asText())
+                .side(node.get("side").asText())
+                .status(node.get("status").asText())
+                .executedQty(BigDecimal.ZERO)
+                .avgPrice(stopPrice)
+                .build();
+
+            log.info("[TAKE_PROFIT_PLACED] symbol={} side={} stopPrice={} orderId={}", symbol, side, stopPrice, resp.getOrderId());
+            return resp;
+        } catch (Exception e) {
+            log.error("[BINANCE] TAKE_PROFIT_MARKET order failed: symbol={} side={} stopPrice={} error={}", symbol, side, stopPrice, e.getMessage());
+            throw new RuntimeException("Binance TAKE_PROFIT_MARKET order failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public BigDecimal getFundingRate(String symbol, String baseUrl) {
+        String base = resolveBase(baseUrl);
+        String endpoint = "/fapi/v1/premiumIndex";
+        String url = base + endpoint + "?symbol=" + symbol;
+
+        log.debug("[BINANCE] GET {} symbol={}", endpoint, symbol);
+
+        try {
+            String body = get(url, null);
+            JsonNode node = parseAndValidate(body);
+            String rate = node.path("lastFundingRate").asText("0");
+            BigDecimal fundingRate = new BigDecimal(rate);
+            log.debug("[BINANCE] Funding rate {}={}", symbol, fundingRate);
+            return fundingRate;
+        } catch (Exception e) {
+            log.warn("[BINANCE] getFundingRate failed: symbol={} error={}", symbol, e.getMessage());
+            return null;
+        }
+    }
+
     // ─── Signing & HTTP helpers ─────────────────────────────────────────────────
 
     private String resolveBase(String baseUrl) {
