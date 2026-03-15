@@ -299,6 +299,26 @@ public class StrategyRunner {
             log.warn("Bot {} funding rate check failed (proceeding): {}", bot.getId(), e.getMessage());
         }
 
+        // --- Spread guard (exchange-level, applies to ALL strategies) ---
+        double maxSpreadPercent = getDoubleParam(params, "maxSpreadPercent", 0.2); // default 0.2%
+        double[] depth = streamService.getDepth(exchangeName, exchangeSymbol);
+        if (depth != null && depth[0] > 0 && depth[1] > 0) {
+            // Estimate spread from order book: best bid ≈ price * (bidVol/(bidVol+askVol))
+            // More robust: use actual price and check bid-ask imbalance as spread proxy
+            BigDecimal price = BigDecimal.valueOf(signal.price());
+            // If bid volume is very low relative to ask, spread is likely wide
+            double bidAskRatio = depth[0] / (depth[0] + depth[1]);
+            // Approximate spread: when ratio deviates significantly from 0.5, spread is wide
+            double impliedSpreadPct = Math.abs(0.5 - bidAskRatio) * 4 * 100; // scale to percentage
+            if (impliedSpreadPct > maxSpreadPercent) {
+                log.warn("[RISK_REJECTED] Bot {} spread too wide: implied={}% max={}% bidVol={} askVol={}",
+                    bot.getId(), String.format("%.4f", impliedSpreadPct), maxSpreadPercent, depth[0], depth[1]);
+                notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                    "Spread too wide: " + String.format("%.4f%%", impliedSpreadPct));
+                return;
+            }
+        }
+
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
