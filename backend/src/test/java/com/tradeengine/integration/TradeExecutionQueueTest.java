@@ -31,6 +31,7 @@ class TradeExecutionQueueTest {
     private CircuitBreakerService circuitBreaker;
     private OrderNormalizerService orderNormalizer;
     private PositionRiskValidator riskValidator;
+    private PositionSyncService positionSyncService;
     private ExchangeClient mockClient;
 
     @BeforeEach
