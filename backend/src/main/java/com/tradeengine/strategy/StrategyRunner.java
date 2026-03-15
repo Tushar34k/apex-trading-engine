@@ -437,15 +437,18 @@ public class StrategyRunner {
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
+                    killSwitch.recordTradeSuccess();
                     handleSellFilled(bot, result, notificationType);
                 } else {
                     log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
+                    killSwitch.recordTradeFailure();
                     circuitBreaker.recordFailure();
                     killSwitch.recordExchangeError();
                 }
             })
             .exceptionally(ex -> {
                 log.error("Bot {} SELL execution timed out: {}", bot.getId(), ex.getMessage());
+                killSwitch.recordTradeFailure();
                 circuitBreaker.recordFailure();
                 killSwitch.recordExchangeError();
                 return null;
