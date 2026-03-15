@@ -67,6 +67,7 @@ class TradeExecutionQueueTest {
         PositionTracker positionTracker = new PositionTracker();
         riskValidator = new PositionRiskValidator(positionTracker);
         riskValidator.setMaxGlobalOpenPositions(100);
+        positionSyncService = mock(PositionSyncService.class);
     }
 
     private TradeRequest buildRequest(String side) {
