@@ -563,6 +563,7 @@ public class StrategyRunner {
             .botId(freshBot.getId())
             .userId(freshBot.getUserId())
             .symbol(freshBot.getSymbol())
+            .side("LONG")
             .exchange(exchangeName)
             .exchangeMode(exchangeMode)
             .entryPrice(result.getAvgPrice())
