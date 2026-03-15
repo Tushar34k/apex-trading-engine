@@ -14,12 +14,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class PositionRiskValidatorTest {
 
     private PositionRiskValidator validator;
+    private PositionTracker positionTracker;
 
     @BeforeEach
     void setUp() {
-        validator = new PositionRiskValidator();
+        positionTracker = new PositionTracker();
+        validator = new PositionRiskValidator(positionTracker);
         validator.setMaxPositionPercent(20);
         validator.setMaxSingleTradePercent(5);
+        validator.setMaxGlobalOpenPositions(100);
     }
 
     // ── Position size checks ──

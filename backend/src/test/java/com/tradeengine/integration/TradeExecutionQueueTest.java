@@ -8,6 +8,8 @@ import com.tradeengine.service.CircuitBreakerService;
 import com.tradeengine.service.KillSwitchService;
 import com.tradeengine.service.OrderNormalizerService;
 import com.tradeengine.service.PositionRiskValidator;
+import com.tradeengine.service.PositionSyncService;
+import com.tradeengine.service.PositionTracker;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
 
@@ -31,6 +33,7 @@ class TradeExecutionQueueTest {
     private CircuitBreakerService circuitBreaker;
     private OrderNormalizerService orderNormalizer;
     private PositionRiskValidator riskValidator;
+    private PositionSyncService positionSyncService;
     private ExchangeClient mockClient;
 
     @BeforeEach
@@ -63,7 +66,10 @@ class TradeExecutionQueueTest {
                 .quantity(inv.getArgument(2)).price(inv.getArgument(3))
                 .valid(true).build());
 
-        riskValidator = new PositionRiskValidator();
+        PositionTracker positionTracker = new PositionTracker();
+        riskValidator = new PositionRiskValidator(positionTracker);
+        riskValidator.setMaxGlobalOpenPositions(100);
+        positionSyncService = mock(PositionSyncService.class);
     }
 
     private TradeRequest buildRequest(String side) {
@@ -92,7 +98,7 @@ class TradeExecutionQueueTest {
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("42000"))
                 .build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
@@ -109,7 +115,7 @@ class TradeExecutionQueueTest {
         when(killSwitch.isActive()).thenReturn(true);
         when(killSwitch.getActivationReason()).thenReturn("Test kill");
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
@@ -129,7 +135,7 @@ class TradeExecutionQueueTest {
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("42000"))
                 .build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
@@ -167,7 +173,7 @@ class TradeExecutionQueueTest {
                     .build();
             });
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         UUID botId = UUID.randomUUID();
         TradeRequest req1 = TradeRequest.builder()
@@ -203,7 +209,7 @@ class TradeExecutionQueueTest {
     @Test
     @DisplayName("Validation rejects invalid request")
     void validationRejectsInvalid() throws Exception {
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         TradeRequest invalid = TradeRequest.builder()
             .botId(UUID.randomUUID()).userId(UUID.randomUUID())
@@ -224,7 +230,7 @@ class TradeExecutionQueueTest {
     @Test
     @DisplayName("Live trading disabled blocks LIVE mode requests")
     void liveTradingDisabledBlocks() throws Exception {
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         TradeRequest req = TradeRequest.builder()
             .botId(UUID.randomUUID()).userId(UUID.randomUUID())
@@ -252,7 +258,7 @@ class TradeExecutionQueueTest {
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("42000"))
                 .build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
         req.getResultFuture().get(5, TimeUnit.SECONDS);
@@ -274,7 +280,7 @@ class TradeExecutionQueueTest {
                 .quantity(new BigDecimal("0")).price(new BigDecimal("65000"))
                 .valid(false).validationMessage("Quantity below minQty").build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
@@ -297,7 +303,7 @@ class TradeExecutionQueueTest {
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("42000"))
                 .build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 

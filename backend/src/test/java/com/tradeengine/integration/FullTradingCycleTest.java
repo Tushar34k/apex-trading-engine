@@ -50,15 +50,18 @@ class FullTradingCycleTest {
         symbolRegistry = mock(ExchangeSymbolRegistry.class);
         orderNormalizer = new OrderNormalizerService(symbolRegistry);
 
-        riskValidator = new PositionRiskValidator();
+        PositionTracker positionTracker = new PositionTracker();
+        riskValidator = new PositionRiskValidator(positionTracker);
         riskValidator.setMaxPositionPercent(20);
         riskValidator.setMaxSingleTradePercent(5);
+        riskValidator.setMaxGlobalOpenPositions(100);
 
         // Mock balance for risk validation
         when(mockClient.getBalances(anyString(), anyString(), anyString()))
             .thenReturn(List.of(Balance.builder().asset("USDT").free(new BigDecimal("10000")).locked(BigDecimal.ZERO).build()));
 
-        queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        PositionSyncService positionSyncService = mock(PositionSyncService.class);
+        queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
     }
 
     @AfterEach
