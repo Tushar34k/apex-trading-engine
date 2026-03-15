@@ -6,6 +6,7 @@ import com.tradeengine.exchange.ExchangeClient;
 import com.tradeengine.exchange.ExchangeFactory;
 import com.tradeengine.exchange.ExchangeSymbolRegistry;
 import com.tradeengine.exchange.SymbolInfo;
+import com.tradeengine.exchange.OrderResponse;
 import com.tradeengine.exchange.SymbolMapperService;
 import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.execution.TradeRequest;
