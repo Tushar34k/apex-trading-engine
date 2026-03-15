@@ -58,6 +58,8 @@ public class SystemMetricsController {
         ks.put("activatedAt", killSwitch.getActivatedAt());
         ks.put("maxDailyLossPercent", killSwitch.getMaxDailyLossPercent());
         ks.put("maxTotalExposureUsdt", killSwitch.getMaxTotalExposureUsdt());
+        ks.put("consecutiveFailures", killSwitch.getConsecutiveFailures());
+        ks.put("maxConsecutiveFailures", killSwitch.getMaxConsecutiveFailures());
         m.put("killSwitch", ks);
 
         // Exchange health

@@ -45,8 +45,10 @@ public class KillSwitchService {
     private volatile double maxDailyLossPercent = 5.0;
     private volatile double maxTotalExposureUsdt = 100_000.0;
     private volatile int maxExchangeErrorsPerMinute = 5;
+    private volatile int maxConsecutiveFailures = 5;
 
     private final ConcurrentLinkedQueue<Instant> recentErrors = new ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.atomic.AtomicInteger consecutiveFailures = new java.util.concurrent.atomic.AtomicInteger(0);
 
     public KillSwitchService(BotRepository botRepo, NotificationService notificationService,
                              @Lazy TradeExecutionQueue executionQueue) {
@@ -153,11 +155,35 @@ public class KillSwitchService {
         return recentErrors.size();
     }
 
+    /**
+     * Record a successful trade — resets consecutive failure counter.
+     */
+    public void recordTradeSuccess() {
+        consecutiveFailures.set(0);
+    }
+
+    /**
+     * Record a failed trade — increments counter and triggers kill switch if threshold exceeded.
+     */
+    public void recordTradeFailure() {
+        int failures = consecutiveFailures.incrementAndGet();
+        log.warn("[KILL_SWITCH] Consecutive trade failures: {}/{}", failures, maxConsecutiveFailures);
+        if (failures >= maxConsecutiveFailures) {
+            activate(failures + " consecutive trade failures exceeded limit of " + maxConsecutiveFailures);
+        }
+    }
+
+    public int getConsecutiveFailures() {
+        return consecutiveFailures.get();
+    }
+
     public void setMaxDailyLossPercent(double pct) { this.maxDailyLossPercent = pct; }
     public void setMaxTotalExposureUsdt(double usdt) { this.maxTotalExposureUsdt = usdt; }
     public void setMaxExchangeErrorsPerMinute(int count) { this.maxExchangeErrorsPerMinute = count; }
+    public void setMaxConsecutiveFailures(int count) { this.maxConsecutiveFailures = count; }
 
     public double getMaxDailyLossPercent() { return maxDailyLossPercent; }
     public double getMaxTotalExposureUsdt() { return maxTotalExposureUsdt; }
     public int getMaxExchangeErrorsPerMinute() { return maxExchangeErrorsPerMinute; }
+    public int getMaxConsecutiveFailures() { return maxConsecutiveFailures; }
 }

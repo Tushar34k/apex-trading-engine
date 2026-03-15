@@ -283,13 +283,53 @@ public class StrategyRunner {
             return;
         }
 
-        BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
-            .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+        // --- Funding rate safety filter ---
+        double maxFundingRate = getDoubleParam(params, "maxFundingRate", 0.001); // default 0.1%
+        try {
+            BigDecimal fundingRate = exchangeClient.getFundingRate(exchangeSymbol, exchangeBaseUrl);
+            if (fundingRate != null && fundingRate.abs().doubleValue() > maxFundingRate) {
+                log.warn("[RISK_REJECTED] Bot {} funding rate {} exceeds max {} for {}",
+                    bot.getId(), fundingRate, maxFundingRate, exchangeSymbol);
+                notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                    "Funding rate " + fundingRate + " exceeds safety limit " + maxFundingRate);
+                return;
+            }
+        } catch (Exception e) {
+            log.warn("Bot {} funding rate check failed (proceeding): {}", bot.getId(), e.getMessage());
+        }
+
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        BigDecimal rawQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
-        BigDecimal quantity = symbolInfo != null ? symbolInfo.roundQuantity(rawQty) : rawQty.setScale(6, RoundingMode.DOWN);
+        // --- Risk-based position sizing ---
+        // If SL is available, size position so max loss = riskPercent% of balance
+        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 1.0); // default 1%
+        BigDecimal quantity;
+
+        if (signal.stopLoss() != null && signal.stopLoss() > 0) {
+            BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
+            BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
+            if (slDistance.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
+                // Also cap by tradeSizePercent allocation
+                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+                BigDecimal maxQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+                quantity = riskBasedQty.min(maxQty);
+                log.info("[RISK_SIZING] botId={} riskAmt={} slDist={} riskQty={} maxQty={} finalQty={}",
+                    bot.getId(), riskAmount, slDistance, riskBasedQty, maxQty, quantity);
+            } else {
+                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+                quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+            }
+        } else {
+            BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+            quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+        }
+
+        quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE", bot.getId());
             return;
@@ -303,8 +343,9 @@ public class StrategyRunner {
             }
         }
 
-        log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue via {}",
-            bot.getId(), bot.getName(), quantity, exchangeSymbol, currentPrice, exchangeName);
+        log.info("[TRADE_SIGNAL] botId={} symbol={} side=BUY qty={} price={} exchange={} confidence={}",
+            bot.getId(), exchangeSymbol, quantity, currentPrice, exchangeName,
+            signal.confidence() != null ? signal.confidence() : "N/A");
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
@@ -333,15 +374,18 @@ public class StrategyRunner {
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
-                    handleBuyFilled(bot, result, apiKey, secret, exName, exMode, exBaseUrl, riskParams);
+                    killSwitch.recordTradeSuccess();
+                    handleBuyFilled(bot, result, apiKey, secret, exName, exMode, exBaseUrl, riskParams, exchangeSymbol);
                 } else {
                     log.error("Bot {} BUY execution failed: {}", bot.getId(), result.getErrorMessage());
+                    killSwitch.recordTradeFailure();
                     circuitBreaker.recordFailure();
                     killSwitch.recordExchangeError();
                 }
             })
             .exceptionally(ex -> {
                 log.error("Bot {} BUY execution timed out: {}", bot.getId(), ex.getMessage());
+                killSwitch.recordTradeFailure();
                 circuitBreaker.recordFailure();
                 killSwitch.recordExchangeError();
                 return null;
@@ -393,15 +437,18 @@ public class StrategyRunner {
             .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .thenAccept(result -> {
                 if (result.isSuccess()) {
+                    killSwitch.recordTradeSuccess();
                     handleSellFilled(bot, result, notificationType);
                 } else {
                     log.error("Bot {} SELL execution failed: {}", bot.getId(), result.getErrorMessage());
+                    killSwitch.recordTradeFailure();
                     circuitBreaker.recordFailure();
                     killSwitch.recordExchangeError();
                 }
             })
             .exceptionally(ex -> {
                 log.error("Bot {} SELL execution timed out: {}", bot.getId(), ex.getMessage());
+                killSwitch.recordTradeFailure();
                 circuitBreaker.recordFailure();
                 killSwitch.recordExchangeError();
                 return null;
@@ -411,7 +458,7 @@ public class StrategyRunner {
     private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result,
                                    String apiKey, String apiSecret,
                                    String exchangeName, String exchangeMode, String exchangeBaseUrl,
-                                   Map<String, Object> params) {
+                                   Map<String, Object> params, String exchangeSymbol) {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
@@ -428,6 +475,9 @@ public class StrategyRunner {
         order.setStatus("FILLED");
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
+
+        log.info("[TRADE_EXECUTED] botId={} symbol={} side=BUY qty={} avgPrice={} orderId={}",
+            freshBot.getId(), exchangeSymbol, result.getExecutedQty(), result.getAvgPrice(), result.getOrderId());
 
         freshBot.setHasOpenPosition(true);
         freshBot.setEntryPrice(result.getAvgPrice());
@@ -446,19 +496,48 @@ public class StrategyRunner {
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
 
-        // Register with PositionTracker for real-time risk monitoring
+        // --- Calculate SL/TP prices ---
+        double defaultSlPercent = 0.7;
+        double defaultTpPercent = 1.4;
         BigDecimal slPrice = params.containsKey("stopLossPercent")
             ? result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
                 BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)))
-            : null;
+            : result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
+                BigDecimal.valueOf(defaultSlPercent / 100)));
         BigDecimal tpPrice = params.containsKey("takeProfitPercent")
             ? result.getAvgPrice().multiply(BigDecimal.ONE.add(
                 BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)))
-            : null;
+            : result.getAvgPrice().multiply(BigDecimal.ONE.add(
+                BigDecimal.valueOf(defaultTpPercent / 100)));
         BigDecimal trailingPct = params.containsKey("trailingStopPercent")
             ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
             : null;
 
+        // --- Place exchange-side protective orders (STOP_MARKET + TAKE_PROFIT_MARKET) ---
+        try {
+            ExchangeClient client = exchangeFactory.getClient(exchangeName);
+
+            // STOP_MARKET for stop loss (reduceOnly=true built into the method)
+            OrderResponse slOrder = client.placeStopMarketOrder(
+                apiKey, apiSecret, exchangeSymbol, "SELL",
+                result.getExecutedQty(), slPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+            log.info("[STOP_LOSS_PLACED] botId={} symbol={} stopPrice={} orderId={}",
+                freshBot.getId(), exchangeSymbol, slPrice.setScale(2, RoundingMode.HALF_UP), slOrder.getOrderId());
+
+            // TAKE_PROFIT_MARKET for take profit (reduceOnly=true built into the method)
+            OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
+                apiKey, apiSecret, exchangeSymbol, "SELL",
+                result.getExecutedQty(), tpPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+            log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} stopPrice={} orderId={}",
+                freshBot.getId(), exchangeSymbol, tpPrice.setScale(2, RoundingMode.HALF_UP), tpOrder.getOrderId());
+
+        } catch (Exception e) {
+            log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",
+                freshBot.getId(), exchangeSymbol, e.getMessage());
+            // Fall back to internal monitoring — PositionRiskManager will still watch this position
+        }
+
+        // Register with PositionTracker for real-time risk monitoring (backup to exchange orders)
         positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
             .botId(freshBot.getId())
             .userId(freshBot.getUserId())
@@ -483,8 +562,9 @@ public class StrategyRunner {
         notificationService.notifyBuy(freshBot.getUserId().toString(), freshBot.getName(), freshBot.getSymbol(),
             result.getAvgPrice(), result.getExecutedQty());
 
-        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}",
-            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty());
+        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}, SL={}, TP={}",
+            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty(),
+            slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP));
     }
 
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType) {
@@ -565,5 +645,10 @@ public class StrategyRunner {
             log.warn("Bot {}: invalid strategyParams JSON", bot.getId());
             return new HashMap<>();
         }
+    }
+
+    private double getDoubleParam(Map<String, Object> params, String key, double defaultVal) {
+        Object val = params.get(key);
+        return val instanceof Number ? ((Number) val).doubleValue() : defaultVal;
     }
 }
