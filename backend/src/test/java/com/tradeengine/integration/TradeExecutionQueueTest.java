@@ -228,7 +228,7 @@ class TradeExecutionQueueTest {
     @Test
     @DisplayName("Live trading disabled blocks LIVE mode requests")
     void liveTradingDisabledBlocks() throws Exception {
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
 
         TradeRequest req = TradeRequest.builder()
             .botId(UUID.randomUUID()).userId(UUID.randomUUID())
