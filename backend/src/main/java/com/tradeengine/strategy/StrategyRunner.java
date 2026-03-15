@@ -496,6 +496,19 @@ public class StrategyRunner {
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
 
+        // --- Slippage guard on entry ---
+        BigDecimal expectedPrice = BigDecimal.valueOf(
+            params.containsKey("__signalPrice") ? ((Number) params.get("__signalPrice")).doubleValue() : 0);
+        if (expectedPrice.compareTo(BigDecimal.ZERO) > 0 && result.getAvgPrice() != null) {
+            BigDecimal entrySlippage = result.getAvgPrice().subtract(expectedPrice).abs()
+                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+            if (entrySlippage.doubleValue() > 0.5) {
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
+                    freshBot.getId(), exchangeSymbol, expectedPrice, result.getAvgPrice(), entrySlippage);
+            }
+        }
+
         // --- Calculate SL/TP prices ---
         double defaultSlPercent = 0.7;
         double defaultTpPercent = 1.4;
@@ -513,6 +526,13 @@ public class StrategyRunner {
             ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
             : null;
 
+        // Round SL/TP to exchange tick size (not hardcoded 2dp)
+        SymbolInfo symInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
+        if (symInfo != null) {
+            slPrice = symInfo.roundPrice(slPrice);
+            tpPrice = symInfo.roundPrice(tpPrice);
+        }
+
         // --- Place exchange-side protective orders (STOP_MARKET + TAKE_PROFIT_MARKET) ---
         try {
             ExchangeClient client = exchangeFactory.getClient(exchangeName);
@@ -520,16 +540,16 @@ public class StrategyRunner {
             // STOP_MARKET for stop loss (reduceOnly=true built into the method)
             OrderResponse slOrder = client.placeStopMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
-                result.getExecutedQty(), slPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+                result.getExecutedQty(), slPrice, exchangeBaseUrl);
             log.info("[STOP_LOSS_PLACED] botId={} symbol={} stopPrice={} orderId={}",
-                freshBot.getId(), exchangeSymbol, slPrice.setScale(2, RoundingMode.HALF_UP), slOrder.getOrderId());
+                freshBot.getId(), exchangeSymbol, slPrice, slOrder.getOrderId());
 
             // TAKE_PROFIT_MARKET for take profit (reduceOnly=true built into the method)
             OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
-                result.getExecutedQty(), tpPrice.setScale(2, RoundingMode.HALF_UP), exchangeBaseUrl);
+                result.getExecutedQty(), tpPrice, exchangeBaseUrl);
             log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} stopPrice={} orderId={}",
-                freshBot.getId(), exchangeSymbol, tpPrice.setScale(2, RoundingMode.HALF_UP), tpOrder.getOrderId());
+                freshBot.getId(), exchangeSymbol, tpPrice, tpOrder.getOrderId());
 
         } catch (Exception e) {
             log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",

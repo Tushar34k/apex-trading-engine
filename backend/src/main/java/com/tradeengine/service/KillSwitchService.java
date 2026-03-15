@@ -114,7 +114,8 @@ public class KillSwitchService {
             activationReason = null;
             activatedAt = null;
             recentErrors.clear();
-            log.info("[KILL_SWITCH_RESET] Previous reason: {}", prevReason);
+            consecutiveFailures.set(0);
+            log.info("[KILL_SWITCH_RESET] Previous reason: {} — consecutive failures counter reset", prevReason);
         }
     }
 
