@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Pre-trade position risk validator.
  * Rejects orders that would exceed configured max exposure limits.
- * Includes liquidation safety and leverage checks.
+ * Includes liquidation safety, leverage checks, and global position limits.
  */
 @Service
 @Slf4j
@@ -30,9 +30,18 @@ public class PositionRiskValidator {
     @Value("${risk.liquidationSafetyPercent:5}")
     private double liquidationSafetyPercent;
 
+    @Value("${risk.maxGlobalOpenPositions:20}")
+    private int maxGlobalOpenPositions;
+
     // bot+symbol → 2-second cooldown lock
     private final ConcurrentHashMap<String, Long> orderLocks = new ConcurrentHashMap<>();
     private static final long ORDER_LOCK_MS = 2000;
+
+    private final PositionTracker positionTracker;
+
+    public PositionRiskValidator(PositionTracker positionTracker) {
+        this.positionTracker = positionTracker;
+    }
 
     /**
      * Validate that the order does not exceed position size limits.
@@ -74,6 +83,16 @@ public class PositionRiskValidator {
                 accountBalance.toPlainString(), maxPosition.toPlainString(),
                 exchange, symbol);
             log.warn("[ORDER_REJECTED] reason=MAX_POSITION_EXCEEDED {}", msg);
+            return msg;
+        }
+
+        // Global max open positions check
+        int currentOpenPositions = positionTracker.getOpenPositionCount();
+        if (currentOpenPositions >= maxGlobalOpenPositions) {
+            String msg = String.format(
+                "Global open positions %d reached limit %d. Rejecting new order for %s:%s",
+                currentOpenPositions, maxGlobalOpenPositions, exchange, symbol);
+            log.warn("[ORDER_REJECTED] reason=MAX_GLOBAL_POSITIONS {}", msg);
             return msg;
         }
 
@@ -172,4 +191,6 @@ public class PositionRiskValidator {
     public void setMaxSingleTradePercent(double pct) { this.maxSingleTradePercent = pct; }
     public void setMaxLeverage(int lev) { this.maxLeverage = lev; }
     public void setLiquidationSafetyPercent(double pct) { this.liquidationSafetyPercent = pct; }
+    public void setMaxGlobalOpenPositions(int max) { this.maxGlobalOpenPositions = max; }
+    public int getMaxGlobalOpenPositions() { return maxGlobalOpenPositions; }
 }

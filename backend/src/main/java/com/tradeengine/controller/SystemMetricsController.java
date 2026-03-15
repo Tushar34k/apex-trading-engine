@@ -4,7 +4,10 @@ import com.tradeengine.execution.TradeExecutionQueue;
 import com.tradeengine.repository.BotRepository;
 import com.tradeengine.repository.PositionRepository;
 import com.tradeengine.service.CircuitBreakerService;
+import com.tradeengine.service.ExposureMonitorService;
 import com.tradeengine.service.KillSwitchService;
+import com.tradeengine.service.PositionTracker;
+import com.tradeengine.ws.BinanceStreamClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +24,9 @@ public class SystemMetricsController {
     private final PositionRepository positionRepo;
     private final KillSwitchService killSwitch;
     private final CircuitBreakerService circuitBreaker;
+    private final ExposureMonitorService exposureMonitor;
+    private final BinanceStreamClient binanceStreamClient;
+    private final PositionTracker positionTracker;
 
     @GetMapping("/metrics")
     public Map<String, Object> getMetrics() {
@@ -35,6 +41,9 @@ public class SystemMetricsController {
         queueMetrics.put("totalSubmitted", executionQueue.getTotalSubmitted());
         queueMetrics.put("totalExecuted", executionQueue.getTotalExecuted());
         queueMetrics.put("totalFailed", executionQueue.getTotalFailed());
+        queueMetrics.put("totalRejected", executionQueue.getTotalRejected());
+        queueMetrics.put("successRate", Math.round(executionQueue.getSuccessRate() * 100.0) / 100.0);
+        queueMetrics.put("avgLatencyMs", Math.round(executionQueue.getAvgLatencyMs() * 100.0) / 100.0);
         m.put("queue", queueMetrics);
 
         // Flat compat fields
@@ -47,9 +56,10 @@ public class SystemMetricsController {
         m.put("totalBots", botRepo.count());
         m.put("runningBots", botRepo.findByStatus("RUNNING").size());
 
-        // Positions — use count query instead of findAll()
+        // Positions
         long openPositions = positionRepo.countByStatus("OPEN");
         m.put("openPositions", openPositions);
+        m.put("trackedPositions", positionTracker.getOpenPositionCount());
 
         // Kill switch
         Map<String, Object> ks = new LinkedHashMap<>();
@@ -70,6 +80,20 @@ public class SystemMetricsController {
         exchange.put("killSwitchErrors", killSwitch.getRecentErrorCount());
         exchange.put("maxErrorsPerMinute", killSwitch.getMaxExchangeErrorsPerMinute());
         m.put("exchangeHealth", exchange);
+
+        // Exposure monitoring
+        ExposureMonitorService.ExposureSnapshot snapshot = exposureMonitor.getLatestSnapshot();
+        Map<String, Object> exposure = new LinkedHashMap<>();
+        exposure.put("totalExposureUsdt", snapshot.totalExposureUsdt());
+        exposure.put("dailyRealizedPnl", snapshot.dailyRealizedPnl());
+        exposure.put("accountBalance", snapshot.accountBalance());
+        exposure.put("openPositionCount", snapshot.openPositionCount());
+        exposure.put("perSymbolExposure", snapshot.perSymbolExposure());
+        exposure.put("lastUpdated", snapshot.timestamp());
+        m.put("exposure", exposure);
+
+        // WebSocket stream health
+        m.put("streamHealth", binanceStreamClient.getStreamHealth());
 
         return m;
     }
