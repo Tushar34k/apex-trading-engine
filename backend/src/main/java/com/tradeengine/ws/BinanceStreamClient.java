@@ -28,6 +28,7 @@ public class BinanceStreamClient {
     private static final String WS_BASE = "wss://fstream.binance.com/stream?streams=";
     private static final String TESTNET_WS_BASE = "wss://stream.binancefuture.com/stream?streams=";
     private static final long STALE_THRESHOLD_MS = 5000;
+    private static final long DEAD_STREAM_THRESHOLD_MS = 30_000; // 30s = stream considered dead
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient httpClient = HttpClient.newHttpClient();
@@ -41,11 +42,22 @@ public class BinanceStreamClient {
     // Order book depth cache: symbol -> [totalBidVolume, totalAskVolume]
     private final ConcurrentHashMap<String, double[]> depthCache = new ConcurrentHashMap<>();
 
+    // Stream health tracking
+    private final ConcurrentHashMap<String, Long> lastMessageTime = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> messageCounters = new ConcurrentHashMap<>();
+
     private final Set<String> subscribedSymbols = ConcurrentHashMap.newKeySet();
     private final Map<String, WebSocket> activeConnections = new ConcurrentHashMap<>();
     private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
+    // Reuse for health monitoring
+    private final ScheduledExecutorService healthMonitor = Executors.newSingleThreadScheduledExecutor();
 
     private BiConsumer<String, Double> priceUpdateListener;
+
+    {
+        // Start health monitor — checks every 10s for dead streams
+        healthMonitor.scheduleAtFixedRate(this::checkStreamHealth, 15, 10, TimeUnit.SECONDS);
+    }
 
     public void setPriceUpdateListener(BiConsumer<String, Double> listener) {
         this.priceUpdateListener = listener;
