@@ -96,7 +96,7 @@ class TradeExecutionQueueTest {
                 .executedQty(new BigDecimal("0.001")).avgPrice(new BigDecimal("42000"))
                 .build());
 
-        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator);
+        TradeExecutionQueue queue = new TradeExecutionQueue(exchangeFactory, killSwitch, circuitBreaker, orderNormalizer, riskValidator, positionSyncService);
         TradeRequest req = buildRequest("BUY");
         queue.submitTrade(req);
 
