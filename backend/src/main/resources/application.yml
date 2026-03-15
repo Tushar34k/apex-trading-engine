@@ -49,6 +49,7 @@ risk:
   maxSingleTradePercent: ${RISK_MAX_SINGLE_TRADE_PERCENT:2}
   maxLeverage: ${RISK_MAX_LEVERAGE:5}
   liquidationSafetyPercent: ${RISK_LIQUIDATION_SAFETY_PERCENT:5}
+  maxGlobalOpenPositions: ${RISK_MAX_GLOBAL_OPEN_POSITIONS:20}
 
 symbols:
   mappings:
