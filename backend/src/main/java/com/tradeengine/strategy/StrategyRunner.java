@@ -283,13 +283,53 @@ public class StrategyRunner {
             return;
         }
 
-        BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
-            .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+        // --- Funding rate safety filter ---
+        double maxFundingRate = getDoubleParam(params, "maxFundingRate", 0.001); // default 0.1%
+        try {
+            BigDecimal fundingRate = exchangeClient.getFundingRate(exchangeSymbol, exchangeBaseUrl);
+            if (fundingRate != null && fundingRate.abs().doubleValue() > maxFundingRate) {
+                log.warn("[RISK_REJECTED] Bot {} funding rate {} exceeds max {} for {}",
+                    bot.getId(), fundingRate, maxFundingRate, exchangeSymbol);
+                notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                    "Funding rate " + fundingRate + " exceeds safety limit " + maxFundingRate);
+                return;
+            }
+        } catch (Exception e) {
+            log.warn("Bot {} funding rate check failed (proceeding): {}", bot.getId(), e.getMessage());
+        }
+
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        BigDecimal rawQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
-        BigDecimal quantity = symbolInfo != null ? symbolInfo.roundQuantity(rawQty) : rawQty.setScale(6, RoundingMode.DOWN);
+        // --- Risk-based position sizing ---
+        // If SL is available, size position so max loss = riskPercent% of balance
+        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 1.0); // default 1%
+        BigDecimal quantity;
+
+        if (signal.stopLoss() != null && signal.stopLoss() > 0) {
+            BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
+            BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
+            if (slDistance.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
+                // Also cap by tradeSizePercent allocation
+                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+                BigDecimal maxQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+                quantity = riskBasedQty.min(maxQty);
+                log.info("[RISK_SIZING] botId={} riskAmt={} slDist={} riskQty={} maxQty={} finalQty={}",
+                    bot.getId(), riskAmount, slDistance, riskBasedQty, maxQty, quantity);
+            } else {
+                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+                quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+            }
+        } else {
+            BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
+                .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+            quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+        }
+
+        quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE", bot.getId());
             return;
@@ -303,8 +343,9 @@ public class StrategyRunner {
             }
         }
 
-        log.info("Bot {} [{}]: Submitting BUY {} {} @ ~{} to execution queue via {}",
-            bot.getId(), bot.getName(), quantity, exchangeSymbol, currentPrice, exchangeName);
+        log.info("[TRADE_SIGNAL] botId={} symbol={} side=BUY qty={} price={} exchange={} confidence={}",
+            bot.getId(), exchangeSymbol, quantity, currentPrice, exchangeName,
+            signal.confidence() != null ? signal.confidence() : "N/A");
 
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
