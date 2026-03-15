@@ -210,6 +210,7 @@ public class PositionSyncService {
                     .botId(bot.getId())
                     .userId(bot.getUserId())
                     .symbol(internal.getSymbol())
+                    .side(internal.getSide() != null ? internal.getSide() : external.getSide())
                     .exchange(internal.getExchange())
                     .exchangeMode(internal.getExchangeMode())
                     .entryPrice(external.getEntryPrice())
