@@ -10,6 +10,7 @@ import {
   BarChart3,
   FlaskConical,
   ShieldCheck,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
