@@ -39,8 +39,8 @@ public class RiskManagementService {
      * Validate a BUY order against all risk rules.
      */
     public RiskCheck validateBuy(TradingBot bot, BigDecimal usdtBalance, Map<String, Object> params) {
-        // 1. Max open positions (default 1)
-        int maxPositions = getInt(params, "maxPositions", 1);
+        // 1. Max open positions (default 3 for institutional grade)
+        int maxPositions = getInt(params, "maxPositions", 3);
         List<TradePosition> openPositions = positionRepo.findByBotIdAndStatus(bot.getId(), "OPEN");
         if (openPositions.size() >= maxPositions) {
             log.warn("Bot {} RISK: Max open positions reached ({}/{})", bot.getId(), openPositions.size(), maxPositions);
@@ -60,14 +60,14 @@ public class RiskManagementService {
             return new RiskCheck(false, "Insufficient USDT balance: " + usdtBalance);
         }
 
-        // 4. Max daily loss
-        double maxDailyLossPercent = getDouble(params, "maxDailyLossPercent", 0);
+        // 4. Max daily loss (default 3%)
+        double maxDailyLossPercent = getDouble(params, "maxDailyLossPercent", 3.0);
         if (maxDailyLossPercent > 0) {
             BigDecimal dailyPnl = calculateDailyPnl(bot);
             BigDecimal maxLoss = usdtBalance.multiply(BigDecimal.valueOf(maxDailyLossPercent / 100)).negate();
             if (dailyPnl.compareTo(maxLoss) <= 0) {
                 log.warn("Bot {} RISK: Daily loss limit reached: {} (max: {})", bot.getId(), dailyPnl, maxLoss);
-                return new RiskCheck(false, "Daily loss limit reached: $" + dailyPnl.setScale(2, RoundingMode.HALF_UP));
+                return new RiskCheck(false, "Daily loss limit reached: $" + dailyPnl.setScale(2, RoundingMode.HALF_UP) + " (max " + maxDailyLossPercent + "%)");
             }
         }
 
@@ -89,6 +89,16 @@ public class RiskManagementService {
             if (allocAmount.doubleValue() > maxPositionSize) {
                 log.warn("Bot {} RISK: Position size ${} exceeds max ${}", bot.getId(), allocAmount, maxPositionSize);
                 return new RiskCheck(false, "Position size $" + allocAmount.setScale(2, RoundingMode.HALF_UP) + " exceeds max $" + maxPositionSize);
+            }
+        }
+
+        // 7. Consecutive losses auto-stop (default 3)
+        int maxConsecutiveLosses = getInt(params, "maxConsecutiveLosses", 3);
+        if (maxConsecutiveLosses > 0) {
+            int consecutiveLosses = countConsecutiveLosses(bot);
+            if (consecutiveLosses >= maxConsecutiveLosses) {
+                log.warn("Bot {} RISK: {} consecutive losses (max {})", bot.getId(), consecutiveLosses, maxConsecutiveLosses);
+                return new RiskCheck(false, consecutiveLosses + " consecutive losses — auto-paused (max " + maxConsecutiveLosses + ")");
             }
         }
 
