@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { bots as botsApi } from '@/lib/api';
+import client from '@/lib/api';
+import type { CreateBotRequest } from '@/types';
 import type { CreateBotRequest } from '@/types';
 
 export function useBots() {
