@@ -11,6 +11,7 @@ import ApiKeys from "./pages/ApiKeys";
 import Analytics from "./pages/Analytics";
 import Backtesting from "./pages/Backtesting";
 import RiskControl from "./pages/RiskControl";
+import PaperTrading from "./pages/PaperTrading";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import NotFound from "./pages/NotFound";
