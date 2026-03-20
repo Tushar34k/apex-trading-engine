@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, IChartApi, CandlestickSeries, LineSeries, createSeriesMarkers } from "lightweight-charts";
 import { useCandles } from "@/hooks/api/useMarket";
 import { useTrades } from "@/hooks/api/useTrades";
+import { usePositions } from "@/hooks/api/useTrades";
 import type { CandleData } from "@/types";
 
 interface TradingChartProps {
@@ -16,6 +17,7 @@ export function TradingChart({ symbol = "BTCUSDT", timeframe: initialTimeframe =
 
   const { data: candles } = useCandles(symbol, timeframe, 200);
   const { data: tradesList } = useTrades();
+  const { data: positionsList } = usePositions();
 
   useEffect(() => {
     if (!containerRef.current || !candles?.length) return;
@@ -102,6 +104,72 @@ export function TradingChart({ symbol = "BTCUSDT", timeframe: initialTimeframe =
       ema21Series.setData(ema21Data);
     }
 
+    // EMA 200 overlay
+    if (chartData.length >= 200) {
+      const ema200Data = calculateEMA(chartData, 200);
+      const ema200Series = chart.addSeries(LineSeries, {
+        color: "hsl(280 70% 60%)",
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+      ema200Series.setData(ema200Data);
+    }
+
+    // --- SL/TP Price Lines for open positions ---
+    if (positionsList?.length) {
+      const activePosition = positionsList.find(
+        (p) => p.symbol.replace("/", "").toUpperCase() === symbol.toUpperCase()
+      );
+
+      if (activePosition) {
+        // Entry price line
+        candleSeries.createPriceLine({
+          price: activePosition.entryPrice,
+          color: "hsl(199 89% 48%)",
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `Entry $${activePosition.entryPrice.toLocaleString()}`,
+        });
+
+        // Stop Loss line (if we have it from position data)
+        if ((activePosition as any).stopLoss) {
+          candleSeries.createPriceLine({
+            price: (activePosition as any).stopLoss,
+            color: "#ef4444",
+            lineWidth: 2,
+            lineStyle: 0,
+            axisLabelVisible: true,
+            title: `SL $${(activePosition as any).stopLoss.toLocaleString()}`,
+          });
+        }
+
+        // Take Profit line
+        if ((activePosition as any).takeProfit) {
+          candleSeries.createPriceLine({
+            price: (activePosition as any).takeProfit,
+            color: "#22c55e",
+            lineWidth: 2,
+            lineStyle: 0,
+            axisLabelVisible: true,
+            title: `TP $${(activePosition as any).takeProfit.toLocaleString()}`,
+          });
+        }
+
+        // TP1 (partial profit) line
+        if ((activePosition as any).tp1) {
+          candleSeries.createPriceLine({
+            price: (activePosition as any).tp1,
+            color: "#22c55e80",
+            lineWidth: 1,
+            lineStyle: 2,
+            axisLabelVisible: true,
+            title: `TP1 (50%)`,
+          });
+        }
+      }
+    }
+
     chart.timeScale().fitContent();
 
     const resizeObserver = new ResizeObserver((entries) => {
@@ -115,7 +183,7 @@ export function TradingChart({ symbol = "BTCUSDT", timeframe: initialTimeframe =
       resizeObserver.disconnect();
       chart.remove();
     };
-  }, [candles, tradesList, symbol]);
+  }, [candles, tradesList, positionsList, symbol]);
 
   const displaySymbol = symbol.replace('USDT', '/USDT');
 
@@ -137,6 +205,14 @@ export function TradingChart({ symbol = "BTCUSDT", timeframe: initialTimeframe =
         </div>
       </div>
       <div ref={containerRef} />
+      {/* SL/TP Legend */}
+      <div className="flex items-center gap-4 px-4 py-1.5 border-t border-border text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[hsl(38_92%_50%)]" /> EMA9</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[hsl(199_89%_48%)]" /> EMA21</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[hsl(280_70%_60%)]" style={{ borderBottom: '1px dashed' }} /> EMA200</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#ef4444]" /> Stop Loss</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-3 h-0.5 bg-[#22c55e]" /> Take Profit</span>
+      </div>
     </div>
   );
 }
