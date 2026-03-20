@@ -123,6 +123,28 @@ public class RiskManagementService {
             .count();
     }
 
+    /**
+     * Count how many recent consecutive trades were losses (most recent first).
+     */
+    private int countConsecutiveLosses(TradingBot bot) {
+        List<TradePosition> positions = positionRepo.findByBotId(bot.getId());
+        // Sort by closedAt desc to get most recent first
+        List<TradePosition> closed = positions.stream()
+            .filter(p -> "CLOSED".equals(p.getStatus()) && p.getRealizedPnl() != null && p.getClosedAt() != null)
+            .sorted((a, b) -> b.getClosedAt().compareTo(a.getClosedAt()))
+            .toList();
+
+        int consecutive = 0;
+        for (TradePosition p : closed) {
+            if (p.getRealizedPnl().compareTo(BigDecimal.ZERO) < 0) {
+                consecutive++;
+            } else {
+                break;
+            }
+        }
+        return consecutive;
+    }
+
     private int getInt(Map<String, Object> params, String key, int defaultVal) {
         Object val = params.get(key);
         return val instanceof Number ? ((Number) val).intValue() : defaultVal;
