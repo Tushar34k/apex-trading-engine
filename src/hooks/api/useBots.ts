@@ -43,3 +43,12 @@ export function useDeleteBot() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bots'] }),
   });
 }
+
+export function useUpdateBotParams() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ botId, params }: { botId: string; params: string }) =>
+      client.patch(`/bots/${botId}/params`, { strategyParams: params }).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bots'] }),
+  });
+}

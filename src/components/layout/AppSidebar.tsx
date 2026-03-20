@@ -18,6 +18,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/analytics", icon: BarChart3, label: "Analytics" },
   { to: "/backtesting", icon: FlaskConical, label: "Backtesting" },
+  { to: "/paper-trading", icon: FileText, label: "Paper Trading" },
   { to: "/risk", icon: ShieldCheck, label: "Risk Control" },
   { to: "/api-keys", icon: Key, label: "API Keys" },
 ];
