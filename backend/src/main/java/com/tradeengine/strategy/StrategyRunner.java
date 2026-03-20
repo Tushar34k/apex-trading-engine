@@ -55,7 +55,7 @@ public class StrategyRunner {
     private final CircuitBreakerService circuitBreaker;
     private final PositionTracker positionTracker;
     private final CandleCacheService candleCacheService;
-
+    private final TradeQualityScorer tradeQualityScorer;
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
