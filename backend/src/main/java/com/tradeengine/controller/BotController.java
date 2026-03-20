@@ -147,6 +147,21 @@ public class BotController {
         return ResponseEntity.ok(stats);
     }
 
+    @PatchMapping("/{id}/params")
+    public ResponseEntity<?> updateParams(@PathVariable String id, @RequestBody Map<String, String> body) {
+        UUID botId = UUID.fromString(id);
+        var bot = botRepo.findById(botId).orElse(null);
+        if (bot == null) return ResponseEntity.notFound().build();
+        if (!bot.getUserId().equals(getUserId())) return ResponseEntity.status(403).build();
+
+        String strategyParams = body.get("strategyParams");
+        if (strategyParams != null) {
+            bot.setStrategyParams(strategyParams);
+            botRepo.save(bot);
+        }
+        return ResponseEntity.ok(toMap(bot));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<?> delete(@PathVariable String id) {
         UUID botId = UUID.fromString(id);
