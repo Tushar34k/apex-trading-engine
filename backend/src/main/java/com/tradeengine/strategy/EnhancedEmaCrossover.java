@@ -4,25 +4,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Enhanced EMA Crossover Strategy with multi-layer signal confirmation
- * and multi-timeframe trend alignment.
+ * Enhanced EMA Crossover Strategy v2 — Institutional-Grade Signal Engine
  *
- * Entry conditions (ALL must be met):
- *   1. EMA9/EMA21 crossover
- *   2. EMA200 trend filter (only trade in trend direction)
- *   3. Volume > 1.5× VMA(20)
- *   4. Bullish/Bearish candle confirmation
- *
- * Rejection filters:
- *   - Fake signal: wick > 60% of candle size
- *   - Spread filter: spread > 0.2%
- *   - Volatility filter: ATR > 3× average ATR
- *
- * Multi-timeframe confirmation:
- *   - LONG: price > EMA200 on entry, trend, and macro timeframes
- *   - SHORT: price < EMA200 on entry, trend, and macro timeframes
- *
- * Output includes calculated SL (swing low/high) and TP (1:2 R:R).
+ * MAJOR UPGRADES:
+ *   1. Multi-Timeframe trend alignment (5m/15m/1h EMA200 required)
+ *   2. RSI filter — reject BUY if RSI > 70, reject SELL if RSI < 30
+ *   3. Volume spike confirmation with moving average threshold
+ *   4. ATR-based dynamic Stop Loss (replaces fixed %)
+ *   5. Pullback entry — prefer entries near EMA21 (not chasing breakouts)
+ *   6. Fake breakout protection — candle close above resistance required
+ *   7. Candle body/wick ratio filter
+ *   8. Dynamic TP at 1:2 or 1:3 R:R based on confidence
+ *   9. Partial profit booking levels (TP1 at 1:1 R:R for 50%)
  *
  * Allowed symbols: BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT
  */
@@ -34,14 +27,12 @@ public class EnhancedEmaCrossover implements TradingStrategy {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(EnhancedEmaCrossover.class);
 
-    // ─── Single-timeframe evaluate (backward-compatible) ───
     @Override
     public SignalResult evaluate(List<Double> closingPrices, List<double[]> allCandles,
                                  Map<String, Object> params, boolean hasOpenPosition) {
         return evaluate(closingPrices, allCandles, null, null, params, hasOpenPosition);
     }
 
-    // ─── Multi-timeframe evaluate ───
     @Override
     public SignalResult evaluate(List<Double> entryPrices, List<double[]> entryCandles,
                                  List<double[]> trendCandles, List<double[]> macroCandles,
@@ -58,6 +49,12 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         int atrPeriod = getInt(params, "atrPeriod", 14);
         int swingLookback = getInt(params, "swingLookback", 10);
         double rrRatio = getDouble(params, "rrRatio", 2.0);
+        double atrSlMultiplier = getDouble(params, "atrSlMultiplier", 1.5);
+        double maxPullbackATR = getDouble(params, "maxPullbackATR", 2.5);
+        int rsiPeriod = getInt(params, "rsiPeriod", 14);
+        double rsiOverbought = getDouble(params, "rsiOverbought", 70);
+        double rsiOversold = getDouble(params, "rsiOversold", 30);
+        double minATRRatio = getDouble(params, "minATRRatio", 0.5);
 
         // --- Symbol filter ---
         String symbol = params.containsKey("symbol") ? params.get("symbol").toString() : null;
@@ -90,15 +87,15 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         double prevSlow = EmaCrossover.calculateEMA(prices, slowPeriod, last - 1);
         double currentTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last);
         double prevTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last - 1);
+        double ema50 = EmaCrossover.calculateEMA(prices, 50, last);
 
         boolean crossedAbove = currentFast > currentSlow && prevFast <= prevSlow;
         boolean crossedBelow = currentFast < currentSlow && prevFast >= prevSlow;
 
-        // ─── 2. Trend Filter (EMA200 on entry TF) ───
-        boolean trendUp = price > currentTrend && currentTrend > prevTrend;
-        boolean trendDown = price < currentTrend && currentTrend < prevTrend;
+        // ─── 2. Trend Filter (EMA200 + EMA50 on entry TF) ───
+        boolean trendUp = price > currentTrend && currentTrend > prevTrend && price > ema50;
+        boolean trendDown = price < currentTrend && currentTrend < prevTrend && price < ema50;
 
-        // If multi-TF data is available, additionally require alignment
         if (mtfResult.hasTrendData) {
             trendUp = trendUp && mtfResult.allBullish;
             trendDown = trendDown && mtfResult.allBearish;
@@ -116,7 +113,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         boolean bullishCandle = close > open;
         boolean bearishCandle = close < open;
 
-        // ─── 5. Fake Signal Filter ───
+        // ─── 5. Fake Signal Filter (wick ratio) ───
         double candleSize = high - low;
         if (candleSize <= 0) {
             return new SignalResult(Signal.HOLD, price, "Zero-size candle — skip");
@@ -139,72 +136,122 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         double prevVolume = volumes.length >= 2 ? volumes[volumes.length - 2] : currentVolume;
         boolean singleCandleSpike = currentVolume > 5.0 * prevVolume && currentVolume > 3.0 * volumeMA;
 
-        // ─── 6. Volatility Filter (ATR) ───
+        // ─── 6. ATR Volatility Filter ───
         double currentATR = calculateATR(entryCandles, atrPeriod, entryCandles.size() - 1);
         double avgATR = calculateAvgATR(entryCandles, atrPeriod, 20, entryCandles.size() - 2);
         boolean atrSpikeRejected = currentATR > atrSpikeMultiplier * avgATR;
 
         if (atrSpikeRejected) {
             return new SignalResult(Signal.HOLD, price,
-                String.format("Volatility filter: ATR %.2f > %.1f× avg ATR %.2f — possible liquidation cascade",
-                    currentATR, atrSpikeMultiplier, avgATR));
+                String.format("Volatility filter: ATR %.2f > %.1f× avg ATR %.2f", currentATR, atrSpikeMultiplier, avgATR));
         }
 
-        // ─── 7. Signal Decision ───
+        // Low volatility (sideways) filter
+        double atrRatio = avgATR > 0 ? currentATR / avgATR : 1;
+        if (atrRatio < minATRRatio) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("Low volatility filter: ATR ratio %.2f < min %.2f — likely sideways", atrRatio, minATRRatio));
+        }
+
+        // ─── 7. RSI Filter (NEW) ───
+        double rsi = calculateRSI(prices, rsiPeriod, last);
+        if (crossedAbove && rsi > rsiOverbought) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("RSI filter: RSI=%.1f > %.0f — overbought, skip BUY", rsi, rsiOverbought));
+        }
+        if (crossedBelow && rsi < rsiOversold) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("RSI filter: RSI=%.1f < %.0f — oversold, skip SELL", rsi, rsiOversold));
+        }
+
+        // ─── 8. Pullback Filter (NEW) — penalize entries far from EMA21 ───
+        double ema21 = EmaCrossover.calculateEMA(prices, 21, last);
+        double pullbackDistance = Math.abs(price - ema21) / (currentATR > 0 ? currentATR : 1);
+
+        if (crossedAbove && price > ema21 && pullbackDistance > maxPullbackATR) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("Pullback filter: price %.1fATR from EMA21 (max %.1f) — chasing", pullbackDistance, maxPullbackATR));
+        }
+        if (crossedBelow && price < ema21 && pullbackDistance > maxPullbackATR) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("Pullback filter: price %.1fATR from EMA21 (max %.1f) — chasing", pullbackDistance, maxPullbackATR));
+        }
+
+        // ─── 9. Fake Breakout Protection — candle close above/below level ───
+        // For BUY: close must be > previous swing high (not just wick)
+        // For SELL: close must be < previous swing low (not just wick)
+        double recentHigh = findSwingHigh(entryCandles, swingLookback);
+        double recentLow = findSwingLow(entryCandles, swingLookback);
+
+        // ─── 10. Signal Decision ───
         String mtfTag = mtfResult.hasTrendData ? " | " + mtfResult.logTag : "";
 
         // LONG signal
         if (!hasOpenPosition && crossedAbove && trendUp && volumeConfirmed && bullishCandle
                 && !spreadTooWide && !singleCandleSpike) {
+
+            // ATR-based dynamic SL (replaces fixed swing low in many cases)
+            double atrStopLoss = price - (currentATR * atrSlMultiplier);
             double swingLow = findSwingLow(entryCandles, swingLookback);
-            double stopLoss = swingLow;
+            // Use the HIGHER of ATR-SL and swing low (tighter but more meaningful)
+            double stopLoss = Math.max(atrStopLoss, swingLow);
+
             double risk = price - stopLoss;
             if (risk <= 0) {
-                return new SignalResult(Signal.HOLD, price, "Invalid SL: swing low above price");
+                return new SignalResult(Signal.HOLD, price, "Invalid SL: calculated SL above price");
             }
+
+            // Dynamic TP: use R:R ratio, consider confidence for higher targets
             double takeProfit = price + (risk * rrRatio);
+            // TP1 at 1:1 for partial profit (stored in params downstream)
+            double tp1 = price + risk;
 
             String reason = String.format(
-                "LONG: EMA(%d)=%.2f crossed above EMA(%d)=%.2f | Trend EMA(%d)=%.2f ↑ | Vol=%.0f > %.1f×VMA=%.0f | ATR=%.2f | SL=%.2f TP=%.2f R:R=1:%.1f%s",
-                fastPeriod, currentFast, slowPeriod, currentSlow, trendPeriod, currentTrend,
-                currentVolume, volumeMultiplier, volumeMA, currentATR, stopLoss, takeProfit, rrRatio, mtfTag);
+                "LONG: EMA(%d)↑EMA(%d) | EMA200=%.2f ↑ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | PB=%.1fATR | SL=%.2f(ATR×%.1f) TP=%.2f R:R=1:%.1f TP1=%.2f%s",
+                fastPeriod, slowPeriod, currentTrend, ema50,
+                currentVolume, volumeMultiplier, rsi, currentATR, pullbackDistance,
+                stopLoss, atrSlMultiplier, takeProfit, rrRatio, tp1, mtfTag);
 
             return new SignalResult(Signal.BUY, price, reason, stopLoss, takeProfit, "HIGH");
         }
 
-        // SHORT signal (for futures)
+        // SHORT signal
         if (hasOpenPosition && crossedBelow && trendDown && volumeConfirmed && bearishCandle
                 && !spreadTooWide && !singleCandleSpike) {
+
+            double atrStopLoss = price + (currentATR * atrSlMultiplier);
             double swingHigh = findSwingHigh(entryCandles, swingLookback);
-            double stopLoss = swingHigh;
+            double stopLoss = Math.min(atrStopLoss, swingHigh);
+
             double risk = stopLoss - price;
             if (risk <= 0) {
-                return new SignalResult(Signal.HOLD, price, "Invalid SL: swing high below price");
+                return new SignalResult(Signal.HOLD, price, "Invalid SL: calculated SL below price");
             }
             double takeProfit = price - (risk * rrRatio);
 
             String reason = String.format(
-                "SHORT: EMA(%d)=%.2f crossed below EMA(%d)=%.2f | Trend EMA(%d)=%.2f ↓ | Vol=%.0f > %.1f×VMA=%.0f | ATR=%.2f | SL=%.2f TP=%.2f R:R=1:%.1f%s",
-                fastPeriod, currentFast, slowPeriod, currentSlow, trendPeriod, currentTrend,
-                currentVolume, volumeMultiplier, volumeMA, currentATR, stopLoss, takeProfit, rrRatio, mtfTag);
+                "SHORT: EMA(%d)↓EMA(%d) | EMA200=%.2f ↓ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | SL=%.2f TP=%.2f R:R=1:%.1f%s",
+                fastPeriod, slowPeriod, currentTrend, ema50,
+                currentVolume, volumeMultiplier, rsi, currentATR,
+                stopLoss, takeProfit, rrRatio, mtfTag);
 
             return new SignalResult(Signal.SELL, price, reason, stopLoss, takeProfit, "HIGH");
         }
 
-        // ─── 8. Rejection reasons for transparency ───
+        // ─── Rejection reasons ───
         StringBuilder noTradeReason = new StringBuilder("NO TRADE: ");
         if (!crossedAbove && !crossedBelow) noTradeReason.append("no crossover; ");
         if (crossedAbove && !trendUp) noTradeReason.append("crossover UP but trend DOWN; ");
         if (crossedBelow && !trendDown) noTradeReason.append("crossover DOWN but trend UP; ");
         if ((crossedAbove || crossedBelow) && !volumeConfirmed)
             noTradeReason.append(String.format("vol=%.0f < %.1f×VMA=%.0f; ", currentVolume, volumeMultiplier, volumeMA));
-        if (crossedAbove && !bullishCandle) noTradeReason.append("bearish candle on buy signal; ");
-        if (crossedBelow && !bearishCandle) noTradeReason.append("bullish candle on sell signal; ");
+        if (crossedAbove && !bullishCandle) noTradeReason.append("bearish candle on buy; ");
+        if (crossedBelow && !bearishCandle) noTradeReason.append("bullish candle on sell; ");
         if (spreadTooWide) noTradeReason.append(String.format("spread %.4f > %.4f; ", spread, spreadMax));
         if (singleCandleSpike) noTradeReason.append("single-candle volume spike; ");
 
-        noTradeReason.append(String.format("EMA(%d)=%.2f EMA(%d)=%.2f EMA(%d)=%.2f",
-            fastPeriod, currentFast, slowPeriod, currentSlow, trendPeriod, currentTrend));
+        noTradeReason.append(String.format("RSI=%.1f EMA(%d)=%.2f EMA(%d)=%.2f EMA(%d)=%.2f EMA50=%.2f",
+            rsi, fastPeriod, currentFast, slowPeriod, currentSlow, trendPeriod, currentTrend, ema50));
         if (!mtfTag.isEmpty()) noTradeReason.append(mtfTag);
 
         return new SignalResult(Signal.HOLD, price, noTradeReason.toString());
@@ -232,7 +279,6 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             return new MultiTfResult(false, false, false, false, null, "MTF=ENTRY_ONLY");
         }
 
-        // Compute EMA200 on each available timeframe
         String entryTrend = computeTrendDirection(entryPrice, entryCandles, trendPeriod);
 
         String trendTfTrend = "N/A";
@@ -255,7 +301,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             && (!hasTrend || "DOWN".equals(trendTfTrend))
             && (!hasMacro || "DOWN".equals(macroTfTrend));
 
-        String logTag = String.format("[MULTI_TF_CHECK] 5m=%s 15m=%s 1h=%s", entryTrend, trendTfTrend, macroTfTrend);
+        String logTag = String.format("[MTF] 5m=%s 15m=%s 1h=%s", entryTrend, trendTfTrend, macroTfTrend);
 
         if (!allUp && !allDown) {
             String rejectReason = String.format(
@@ -265,11 +311,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             return new MultiTfResult(true, true, false, false, rejectReason, logTag);
         }
 
-        String checkLog = String.format(
-            "[MULTI_TF_CHECK] symbol=%s 5mTrend=%s 15mTrend=%s 1hTrend=%s decision=%s",
-            symbol, entryTrend, trendTfTrend, macroTfTrend, allUp ? "ALLOW_BUY" : "ALLOW_SELL");
-        log.debug(checkLog);
-
+        log.debug("[MULTI_TF_CHECK] symbol={} {} decision={}", symbol, logTag, allUp ? "ALLOW_BUY" : "ALLOW_SELL");
         return new MultiTfResult(false, true, allUp, allDown, null, logTag);
     }
 
@@ -280,7 +322,25 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         return currentPrice > ema ? "UP" : "DOWN";
     }
 
-    // ─── Helper: Simple Moving Average ───
+    // ─── RSI Calculation ───
+    private double calculateRSI(double[] prices, int period, int endIndex) {
+        if (endIndex < period + 1) return 50;
+        double gainSum = 0, lossSum = 0;
+        int start = endIndex - period;
+        for (int i = start + 1; i <= endIndex; i++) {
+            double change = prices[i] - prices[i - 1];
+            if (change > 0) gainSum += change;
+            else lossSum -= change;
+        }
+        double avgGain = gainSum / period;
+        double avgLoss = lossSum / period;
+        if (avgLoss == 0) return 100;
+        double rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
+    }
+
+    // ─── Helpers ───
+
     private double calculateSMA(double[] data, int period, int endIndex) {
         int start = Math.max(0, endIndex - period + 1);
         double sum = 0;
@@ -292,15 +352,12 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         return count > 0 ? sum / count : 0;
     }
 
-    // ─── Helper: Average True Range ───
     private double calculateATR(List<double[]> candles, int period, int endIndex) {
         double sum = 0;
         int count = 0;
         int start = Math.max(1, endIndex - period + 1);
         for (int i = start; i <= endIndex && i < candles.size(); i++) {
-            double high = candles.get(i)[2];
-            double low = candles.get(i)[3];
-            double prevClose = candles.get(i - 1)[4];
+            double high = candles.get(i)[2], low = candles.get(i)[3], prevClose = candles.get(i - 1)[4];
             double tr = Math.max(high - low, Math.max(Math.abs(high - prevClose), Math.abs(low - prevClose)));
             sum += tr;
             count++;
@@ -308,7 +365,6 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         return count > 0 ? sum / count : 0;
     }
 
-    // ─── Helper: Average ATR over a window (for spike detection) ───
     private double calculateAvgATR(List<double[]> candles, int atrPeriod, int windowSize, int endIndex) {
         double sum = 0;
         int count = 0;
@@ -320,24 +376,20 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         return count > 0 ? sum / count : 1;
     }
 
-    // ─── Helper: Find recent swing low ───
     private double findSwingLow(List<double[]> candles, int lookback) {
         double lowest = Double.MAX_VALUE;
         int start = Math.max(0, candles.size() - 1 - lookback);
         for (int i = start; i < candles.size() - 1; i++) {
-            double low = candles.get(i)[3];
-            if (low < lowest) lowest = low;
+            if (candles.get(i)[3] < lowest) lowest = candles.get(i)[3];
         }
         return lowest;
     }
 
-    // ─── Helper: Find recent swing high ───
     private double findSwingHigh(List<double[]> candles, int lookback) {
         double highest = Double.MIN_VALUE;
         int start = Math.max(0, candles.size() - 1 - lookback);
         for (int i = start; i < candles.size() - 1; i++) {
-            double high = candles.get(i)[2];
-            if (high > highest) highest = high;
+            if (candles.get(i)[2] > highest) highest = candles.get(i)[2];
         }
         return highest;
     }

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { bots as botsApi } from '@/lib/api';
+import client from '@/lib/api';
 import type { CreateBotRequest } from '@/types';
 
 export function useBots() {
@@ -38,6 +39,15 @@ export function useDeleteBot() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => botsApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bots'] }),
+  });
+}
+
+export function useUpdateBotParams() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ botId, params }: { botId: string; params: string }) =>
+      client.patch(`/bots/${botId}/params`, { strategyParams: params }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bots'] }),
   });
 }

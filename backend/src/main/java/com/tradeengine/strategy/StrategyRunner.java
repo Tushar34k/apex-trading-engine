@@ -55,7 +55,7 @@ public class StrategyRunner {
     private final CircuitBreakerService circuitBreaker;
     private final PositionTracker positionTracker;
     private final CandleCacheService candleCacheService;
-
+    private final TradeQualityScorer tradeQualityScorer;
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
@@ -238,6 +238,17 @@ public class StrategyRunner {
             }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
+                // --- Trade Quality Score gate ---
+                TradeQualityScorer.QualityScore qualityScore = tradeQualityScorer.score(
+                    closingPrices, candles, "BUY", params);
+                if (!qualityScore.passed()) {
+                    log.info("[QUALITY_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, qualityScore.breakdown());
+                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                        "Trade quality too low: " + qualityScore.total() + "/100 (min " + params.getOrDefault("minTradeScore", 70) + ")");
+                    return;
+                }
+                log.info("[QUALITY_PASSED] botId={} {}", bot.getId(), qualityScore.breakdown());
+
                 // If strategy provides SL/TP (e.g. ENHANCED_EMA), inject into params
                 if (signal.stopLoss() != null) {
                     double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
@@ -247,7 +258,14 @@ public class StrategyRunner {
                     double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
                     params.put("takeProfitPercent", tpPercent);
                 }
+                // Store TP1 (1:1 R:R) for partial profit booking
+                if (signal.stopLoss() != null && signal.takeProfit() != null) {
+                    double risk = Math.abs(signal.price() - signal.stopLoss());
+                    double tp1 = signal.price() + risk; // 1:1 R:R
+                    params.put("__tp1Price", tp1);
+                }
                 params.put("__signalPrice", signal.price());
+                params.put("__qualityScore", qualityScore.total());
                 submitBuy(bot, decryptedKey, decryptedSecret, signal, exchangeBaseUrl, symbolInfo, params, exchangeName, exchangeClient, exchangeSymbol);
             } else if (signal.signal() == TradingStrategy.Signal.SELL && bot.isHasOpenPosition()) {
                 submitSell(bot, decryptedKey, decryptedSecret,
