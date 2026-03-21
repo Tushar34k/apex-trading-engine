@@ -217,6 +217,9 @@ export interface BacktestResult {
     side: string;
   }>;
   equityCurve: number[][];
+  aiApproved?: number;
+  aiRejected?: number;
+  withoutAI?: BacktestResult;
 }
 
 // --- Notifications ---
