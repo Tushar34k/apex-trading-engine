@@ -176,6 +176,7 @@ const Dashboard = () => {
         <div className="space-y-6">
           <ActiveBots />
           <TradeQualityPanel />
+          <AIValidationPanel />
           <NotificationPanel />
         </div>
       </div>
