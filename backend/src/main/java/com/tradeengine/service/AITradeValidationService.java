@@ -474,6 +474,19 @@ public class AITradeValidationService {
             double confidence = computeWeightedConfidence(factors);
 
             long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
+
+            // Apply same hard rejection rules as live trading
+            List<String> hardRejects = new ArrayList<>();
+            if (factors.getOrDefault("trend", 0.0) < 0.25) hardRejects.add("trend_misaligned");
+            if (factors.getOrDefault("momentum", 0.0) < 0.2) hardRejects.add("no_momentum");
+            if (factors.getOrDefault("volume", 0.0) < 0.2) hardRejects.add("weak_volume");
+            if (factors.getOrDefault("volatility", 0.0) < 0.15) hardRejects.add("dead_market");
+
+            if (!hardRejects.isEmpty()) {
+                String reason = String.format("HARD_REJECT: %s | conf=%.3f", String.join("+", hardRejects), confidence);
+                return new AIValidationResult(Decision.REJECT, confidence, reason, factors, latencyMs);
+            }
+
             Decision decision = confidence >= minConfidence ? Decision.APPROVE : Decision.REJECT;
             String reason = String.format("%s: conf=%.3f (min=%.3f)", decision, confidence, minConfidence);
             return new AIValidationResult(decision, confidence, reason, factors, latencyMs);

@@ -48,6 +48,8 @@ export default function PaperTrading() {
           minTradeScore: 70,
         },
         candleLimit: 500,
+        exchange: "BINANCE",
+        compareAI: true,
       });
       setResult(res);
       toast.success(`Paper trade simulation complete: ${res.totalTrades} trades`);
