@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 public class BacktestService {
 
     private final ExchangeFactory exchangeFactory;
+    private final AITradeValidationService aiValidationService;
 
     @Data
     public static class BacktestRequest {
@@ -28,6 +29,7 @@ public class BacktestService {
         private Map<String, Object> strategyParams;
         private int candleLimit = 500;
         private String exchange = "BINANCE";
+        private boolean compareAI = false; // Run with AND without AI filter for comparison
     }
 
     @Data
@@ -42,6 +44,10 @@ public class BacktestService {
         private int losses;
         private List<Map<String, Object>> trades = new ArrayList<>();
         private List<double[]> equityCurve = new ArrayList<>();
+        // AI comparison fields
+        private int aiApproved;
+        private int aiRejected;
+        private BacktestResult withoutAI; // populated when compareAI=true
     }
 
     public BacktestResult runBacktest(BacktestRequest req) {
@@ -52,8 +58,8 @@ public class BacktestService {
         ExchangeClient client = exchangeFactory.getClient(req.getExchange());
         String baseUrl = client.resolveBaseUrl("TESTNET");
 
-        log.info("Running backtest on {}: {} {} {} candles={}",
-            req.getExchange(), req.symbol, req.strategyType, req.timeframe, req.candleLimit);
+        log.info("Running backtest on {}: {} {} {} candles={} compareAI={}",
+            req.getExchange(), req.symbol, req.strategyType, req.timeframe, req.candleLimit, req.compareAI);
 
         List<double[]> candles = client.getCandles(req.symbol, req.timeframe, req.candleLimit, baseUrl);
         if (candles.size() < 50) {
@@ -65,14 +71,33 @@ public class BacktestService {
         params.putIfAbsent("fastEma", 9);
         params.putIfAbsent("slowEma", 21);
 
+        // Run with AI filter
+        BacktestResult result = simulateWithAI(candles, strategy, params, req.initialBalance, true);
+
+        // If comparison requested, also run without AI filter
+        if (req.isCompareAI()) {
+            BacktestResult noAI = simulateWithAI(candles, strategy, params, req.initialBalance, false);
+            result.setWithoutAI(noAI);
+        }
+
+        log.info("Backtest complete on {}: {} trades, {}% profit, {}% win rate, AI approved={} rejected={}",
+            req.getExchange(), result.getTotalTrades(), result.getProfitPercent(), result.getWinRate(),
+            result.getAiApproved(), result.getAiRejected());
+
+        return result;
+    }
+
+    private BacktestResult simulateWithAI(List<double[]> candles, TradingStrategy strategy,
+                                           Map<String, Object> params, double initialBalance, boolean useAI) {
         BacktestResult result = new BacktestResult();
-        double balance = req.initialBalance;
+        double balance = initialBalance;
         double peakBalance = balance;
         double maxDrawdown = 0;
         boolean inPosition = false;
         double entryPrice = 0;
         double positionQty = 0;
         int wins = 0, losses = 0;
+        int aiApproved = 0, aiRejected = 0;
 
         for (int i = 50; i < candles.size(); i++) {
             List<Double> closingPrices = candles.subList(0, i + 1).stream()
@@ -83,6 +108,17 @@ public class BacktestService {
             double currentPrice = candles.get(i)[4];
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !inPosition) {
+                // AI filter gate
+                if (useAI && closingPrices.size() >= 200) {
+                    AITradeValidationService.AIValidationResult aiResult =
+                        aiValidationService.scoreForBacktest("BUY", closingPrices, candleSlice, null, null, params);
+                    if (!aiResult.isApproved()) {
+                        aiRejected++;
+                        continue; // Skip this trade
+                    }
+                    aiApproved++;
+                }
+
                 double tradeAmount = balance * 0.10;
                 positionQty = tradeAmount / currentPrice;
                 entryPrice = currentPrice;
@@ -124,16 +160,15 @@ public class BacktestService {
 
         int totalTrades = wins + losses;
         result.setFinalBalance(Math.round(balance * 100.0) / 100.0);
-        result.setTotalProfit(Math.round((balance - req.initialBalance) * 100.0) / 100.0);
-        result.setProfitPercent(Math.round((balance - req.initialBalance) / req.initialBalance * 10000.0) / 100.0);
+        result.setTotalProfit(Math.round((balance - initialBalance) * 100.0) / 100.0);
+        result.setProfitPercent(Math.round((balance - initialBalance) / initialBalance * 10000.0) / 100.0);
         result.setWinRate(totalTrades > 0 ? Math.round((double) wins / totalTrades * 10000.0) / 100.0 : 0);
         result.setTotalTrades(totalTrades);
         result.setMaxDrawdown(Math.round(maxDrawdown * 100.0) / 100.0);
         result.setWins(wins);
         result.setLosses(losses);
-
-        log.info("Backtest complete on {}: {} trades, {}% profit, {}% win rate",
-            req.getExchange(), totalTrades, result.getProfitPercent(), result.getWinRate());
+        result.setAiApproved(aiApproved);
+        result.setAiRejected(aiRejected);
 
         return result;
     }
