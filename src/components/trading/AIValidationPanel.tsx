@@ -128,13 +128,17 @@ export function AIValidationPanel() {
                 </span>
               </div>
               {previewMutation.data.factors && (
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  {Object.entries(previewMutation.data.factors as FactorScore).map(([key, value]) => (
-                    <div key={key} className="flex justify-between bg-background rounded px-2 py-1">
-                      <span className="text-muted-foreground capitalize">{key}</span>
-                      <span className="font-mono font-medium">{(value * 100).toFixed(0)}%</span>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-3 gap-1.5 text-xs">
+                  {Object.entries(previewMutation.data.factors as FactorScore).map(([key, value]) => {
+                    const pct = value * 100;
+                    const color = pct >= 70 ? 'text-green-500' : pct >= 40 ? 'text-yellow-500' : 'text-red-500';
+                    return (
+                      <div key={key} className="flex justify-between bg-background rounded px-2 py-1">
+                        <span className="text-muted-foreground capitalize">{key}</span>
+                        <span className={`font-mono font-medium ${color}`}>{pct.toFixed(0)}%</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <p className="text-xs text-muted-foreground">{previewMutation.data.latencyMs}ms latency</p>
