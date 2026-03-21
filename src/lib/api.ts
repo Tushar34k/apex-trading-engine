@@ -221,4 +221,13 @@ export const system = {
     client.post('/system/kill-switch/reset').then((r) => r.data),
 };
 
+export const aiValidation = {
+  preview: (data: { symbol: string; side: string; timeframe: string; exchange: string; params?: Record<string, unknown> }) =>
+    client.post('/ai-validation/preview', data).then((r) => r.data),
+  stats: () =>
+    client.get('/ai-validation/stats').then((r) => r.data),
+  decisions: (limit = 50) =>
+    client.get('/ai-validation/decisions', { params: { limit } }).then((r) => r.data),
+};
+
 export default client;
