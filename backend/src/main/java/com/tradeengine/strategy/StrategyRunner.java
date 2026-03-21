@@ -132,7 +132,7 @@ public class StrategyRunner {
             SymbolInfo symbolInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
             Map<String, Object> params = parseStrategyParams(bot);
 
-            // --- SL/TP/Trailing checks for open positions ---
+            // --- SL/TP/Trailing/Partial-Profit checks for open positions ---
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
                 Double freshPrice = streamService.getFreshPrice(exchangeName, exchangeSymbol);
                 BigDecimal currentPrice;
@@ -143,7 +143,28 @@ public class StrategyRunner {
                     currentPrice = exchangeClient.getPrice(exchangeSymbol, exchangeBaseUrl);
                 }
 
-                // Trailing stop check
+                // --- Partial Profit Booking (TP1 at 1:1 R:R for 50%) ---
+                if (params.containsKey("__tp1Price") && !params.containsKey("__tp1Booked")) {
+                    BigDecimal tp1 = BigDecimal.valueOf(((Number) params.get("__tp1Price")).doubleValue());
+                    if (currentPrice.compareTo(tp1) >= 0 && bot.getQuantity() != null) {
+                        BigDecimal partialQty = bot.getQuantity().divide(BigDecimal.valueOf(2), 8, RoundingMode.DOWN);
+                        if (partialQty.compareTo(BigDecimal.ZERO) > 0) {
+                            if (symbolInfo != null) partialQty = symbolInfo.roundQuantity(partialQty);
+                            log.info("[PARTIAL_TP1] Bot {} booking 50% profit: {} @ {} (TP1={})",
+                                bot.getId(), partialQty, currentPrice, tp1);
+                            submitPartialSell(bot, decryptedKey, decryptedSecret, currentPrice, partialQty,
+                                "Partial TP1 (1:1 R:R) — 50% booked", exchangeBaseUrl, symbolInfo, "BOT_TP1", exchangeName, exchangeSymbol);
+                            params.put("__tp1Booked", true);
+
+                            // Move stop loss to breakeven after TP1
+                            trailingStopService.setBreakevenStop(bot.getId(), bot.getEntryPrice());
+                            log.info("[SL_TO_BE] Bot {} stop loss moved to breakeven: {}", bot.getId(), bot.getEntryPrice());
+                            return;
+                        }
+                    }
+                }
+
+                // Dynamic trailing stop (ATR-based instead of fixed %)
                 if (params.containsKey("trailingStopPercent")) {
                     double tsPct = ((Number) params.get("trailingStopPercent")).doubleValue();
                     if (trailingStopService.checkTrailingStop(bot.getId(), currentPrice, bot.getEntryPrice(), tsPct)) {
@@ -167,7 +188,7 @@ public class StrategyRunner {
                     }
                 }
 
-                // Take-profit check
+                // Take-profit check (remaining 50% after TP1)
                 if (params.containsKey("takeProfitPercent")) {
                     double tpPct = ((Number) params.get("takeProfitPercent")).doubleValue();
                     BigDecimal tpPrice = bot.getEntryPrice().multiply(
