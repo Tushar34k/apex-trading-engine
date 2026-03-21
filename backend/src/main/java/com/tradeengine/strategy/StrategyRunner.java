@@ -544,6 +544,77 @@ public class StrategyRunner {
             });
     }
 
+    /**
+     * Submit a partial sell (e.g. 50% at TP1) — reduces position without closing it.
+     */
+    private void submitPartialSell(TradingBot bot, String apiKey, String secret,
+                                    BigDecimal currentPrice, BigDecimal partialQty, String reason,
+                                    String exchangeBaseUrl, SymbolInfo symbolInfo,
+                                    String notificationType, String exchangeName, String exchangeSymbol) {
+        if (partialQty.compareTo(BigDecimal.ZERO) <= 0) return;
+
+        log.info("[PARTIAL_SELL] Bot {} [{}]: {} {} @ ~{} ({})",
+            bot.getId(), bot.getName(), partialQty, exchangeSymbol, currentPrice, reason);
+
+        TradeRequest request = TradeRequest.builder()
+            .botId(bot.getId())
+            .userId(bot.getUserId())
+            .symbol(exchangeSymbol)
+            .side("SELL")
+            .quantity(partialQty)
+            .orderType("MARKET")
+            .apiKey(apiKey)
+            .apiSecret(secret)
+            .exchangeBaseUrl(exchangeBaseUrl)
+            .exchange(exchangeName)
+            .exchangeMode(bot.getExchangeMode())
+            .notificationType(notificationType)
+            .timestamp(Instant.now())
+            .build();
+
+        executionQueue.submitTrade(request);
+
+        request.getResultFuture()
+            .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .thenAccept(result -> {
+                if (result.isSuccess()) {
+                    killSwitch.recordTradeSuccess();
+                    TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
+                    BigDecimal remaining = freshBot.getQuantity().subtract(result.getExecutedQty());
+                    freshBot.setQuantity(remaining.max(BigDecimal.ZERO));
+                    botRepo.save(freshBot);
+
+                    log.info("[PARTIAL_TP1_FILLED] Bot {} sold {} @ {} remaining={}",
+                        freshBot.getId(), result.getExecutedQty(), result.getAvgPrice(), remaining);
+
+                    TradeOrder order = new TradeOrder();
+                    order.setBotId(freshBot.getId());
+                    order.setUserId(freshBot.getUserId());
+                    order.setExchangeOrderId(result.getOrderId());
+                    order.setSymbol(freshBot.getSymbol());
+                    order.setSide("SELL");
+                    order.setType("MARKET");
+                    order.setQuantity(result.getExecutedQty());
+                    order.setFilledQuantity(result.getExecutedQty());
+                    order.setAvgFillPrice(result.getAvgPrice());
+                    order.setStatus("FILLED");
+                    order.setFilledAt(Instant.now());
+                    orderRepo.save(order);
+
+                    publisher.publishOrderFilled(freshBot.getUserId().toString(), order);
+                    notificationService.notifyTakeProfit(freshBot.getUserId().toString(), freshBot.getName(),
+                        freshBot.getSymbol(), result.getAvgPrice(),
+                        result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(result.getExecutedQty()));
+                } else {
+                    log.error("[PARTIAL_SELL_FAILED] Bot {} error: {}", bot.getId(), result.getErrorMessage());
+                }
+            })
+            .exceptionally(ex -> {
+                log.error("[PARTIAL_SELL_TIMEOUT] Bot {}: {}", bot.getId(), ex.getMessage());
+                return null;
+            });
+    }
+
     private void handleBuyFilled(TradingBot bot, TradeRequest.TradeResult result,
                                    String apiKey, String apiSecret,
                                    String exchangeName, String exchangeMode, String exchangeBaseUrl,
