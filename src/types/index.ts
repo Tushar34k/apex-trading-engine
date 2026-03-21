@@ -196,6 +196,8 @@ export interface BacktestRequest {
   initialBalance: number;
   strategyParams: Record<string, number>;
   candleLimit: number;
+  exchange?: string;
+  compareAI?: boolean;
 }
 
 export interface BacktestResult {
