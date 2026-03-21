@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { FlaskConical, Play, Square, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { FlaskConical, Play, Square, TrendingUp, TrendingDown, AlertTriangle, Brain, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { TradeQualityPanel } from "@/components/trading/TradeQualityPanel";
 import { useRunBacktest } from "@/hooks/api/useBacktest";
@@ -21,11 +22,15 @@ const STRATEGY_LABELS: Record<string, string> = {
   BREAKOUT: "Breakout Strategy",
 };
 
+const EXCHANGES = ["BINANCE", "BYBIT", "DELTA"];
+
 export default function PaperTrading() {
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [strategy, setStrategy] = useState<StrategyType>("ENHANCED_EMA");
   const [timeframe, setTimeframe] = useState("5m");
   const [balance, setBalance] = useState(10000);
+  const [exchange, setExchange] = useState("BINANCE");
+  const [compareAI, setCompareAI] = useState(true);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
@@ -48,6 +53,8 @@ export default function PaperTrading() {
           minTradeScore: 70,
         },
         candleLimit: 500,
+        exchange,
+        compareAI,
       });
       setResult(res);
       toast.success(`Paper trade simulation complete: ${res.totalTrades} trades`);
@@ -96,6 +103,18 @@ export default function PaperTrading() {
               </Select>
             </div>
 
+            <div className="space-y-2">
+              <Label className="text-xs">Exchange</Label>
+              <Select value={exchange} onValueChange={setExchange}>
+                <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {EXCHANGES.map((ex) => (
+                    <SelectItem key={ex} value={ex} className="text-xs">{ex}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label className="text-xs">Timeframe</Label>
@@ -112,6 +131,14 @@ export default function PaperTrading() {
                 <Label className="text-xs">Balance ($)</Label>
                 <Input type="number" value={balance} onChange={(e) => setBalance(Number(e.target.value))} className="text-xs" />
               </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-md border border-border p-3">
+              <div className="flex items-center gap-2">
+                <Brain className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-medium text-foreground">Compare AI Filter</span>
+              </div>
+              <Switch checked={compareAI} onCheckedChange={setCompareAI} />
             </div>
 
             <Button onClick={handleStart} disabled={isRunning} className="w-full gap-2">
@@ -157,6 +184,57 @@ export default function PaperTrading() {
                   <div className="text-lg font-bold font-mono text-foreground">${result.finalBalance.toLocaleString()}</div>
                 </div>
               </div>
+
+              {/* AI Filter Stats */}
+              {(result.aiApproved != null || result.aiRejected != null) && (
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Brain className="h-4 w-4 text-primary" />
+                    <h4 className="text-sm font-semibold text-foreground">AI Filter Impact</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div>
+                      <div className="text-[10px] uppercase text-muted-foreground">AI Approved</div>
+                      <div className="text-lg font-bold font-mono text-profit">{result.aiApproved ?? 0}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-muted-foreground">AI Rejected</div>
+                      <div className="text-lg font-bold font-mono text-loss">{result.aiRejected ?? 0}</div>
+                    </div>
+                    {result.withoutAI && (
+                      <>
+                        <div>
+                          <div className="text-[10px] uppercase text-muted-foreground">Without AI Return</div>
+                          <div className={cn("text-lg font-bold font-mono", result.withoutAI.profitPercent >= 0 ? "text-profit" : "text-loss")}>
+                            {result.withoutAI.profitPercent >= 0 ? "+" : ""}{result.withoutAI.profitPercent}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase text-muted-foreground">Without AI Drawdown</div>
+                          <div className="text-lg font-bold font-mono text-loss">{result.withoutAI.maxDrawdown}%</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {result.withoutAI && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground border-t border-border/50 pt-2">
+                      <Shield className="h-3 w-3" />
+                      <span>
+                        AI filter {result.profitPercent > result.withoutAI.profitPercent ? "improved" : "changed"} return by{' '}
+                        <span className={cn("font-mono font-semibold",
+                          result.profitPercent - result.withoutAI.profitPercent >= 0 ? "text-profit" : "text-loss")}>
+                          {(result.profitPercent - result.withoutAI.profitPercent) >= 0 ? "+" : ""}
+                          {(result.profitPercent - result.withoutAI.profitPercent).toFixed(2)}%
+                        </span>
+                        {' '}and reduced drawdown by{' '}
+                        <span className="font-mono font-semibold text-profit">
+                          {(result.withoutAI.maxDrawdown - result.maxDrawdown).toFixed(2)}%
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Trade list */}
               <div className="rounded-lg border border-border bg-card">

@@ -196,6 +196,8 @@ export interface BacktestRequest {
   initialBalance: number;
   strategyParams: Record<string, number>;
   candleLimit: number;
+  exchange?: string;
+  compareAI?: boolean;
 }
 
 export interface BacktestResult {
@@ -215,6 +217,9 @@ export interface BacktestResult {
     side: string;
   }>;
   equityCurve: number[][];
+  aiApproved?: number;
+  aiRejected?: number;
+  withoutAI?: BacktestResult;
 }
 
 // --- Notifications ---

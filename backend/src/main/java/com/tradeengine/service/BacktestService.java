@@ -95,6 +95,8 @@ public class BacktestService {
         double maxDrawdown = 0;
         boolean inPosition = false;
         double entryPrice = 0;
+        double stopLossPrice = 0;
+        double takeProfitPrice = 0;
         double positionQty = 0;
         int wins = 0, losses = 0;
         int aiApproved = 0, aiRejected = 0;
@@ -104,8 +106,33 @@ public class BacktestService {
                 .map(c -> c[4]).collect(Collectors.toList());
             List<double[]> candleSlice = candles.subList(0, i + 1);
 
-            TradingStrategy.SignalResult signal = strategy.evaluate(closingPrices, candleSlice, params, inPosition);
+            // Use multi-TF evaluate signature (passing null for higher TF in backtest)
+            TradingStrategy.SignalResult signal = strategy.evaluate(closingPrices, candleSlice, null, null, params, inPosition);
             double currentPrice = candles.get(i)[4];
+
+            // Check SL/TP for open positions
+            if (inPosition) {
+                if (stopLossPrice > 0 && currentPrice <= stopLossPrice) {
+                    double sellValue = positionQty * stopLossPrice;
+                    double pnl = sellValue - (positionQty * entryPrice);
+                    balance += sellValue;
+                    inPosition = false;
+                    if (pnl > 0) wins++; else losses++;
+                    addTrade(result, entryPrice, stopLossPrice, positionQty, pnl);
+                    positionQty = 0; entryPrice = 0; stopLossPrice = 0; takeProfitPrice = 0;
+                    continue;
+                }
+                if (takeProfitPrice > 0 && currentPrice >= takeProfitPrice) {
+                    double sellValue = positionQty * takeProfitPrice;
+                    double pnl = sellValue - (positionQty * entryPrice);
+                    balance += sellValue;
+                    inPosition = false;
+                    if (pnl > 0) wins++; else losses++;
+                    addTrade(result, entryPrice, takeProfitPrice, positionQty, pnl);
+                    positionQty = 0; entryPrice = 0; stopLossPrice = 0; takeProfitPrice = 0;
+                    continue;
+                }
+            }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !inPosition) {
                 // AI filter gate
@@ -114,15 +141,29 @@ public class BacktestService {
                         aiValidationService.scoreForBacktest("BUY", closingPrices, candleSlice, null, null, params);
                     if (!aiResult.isApproved()) {
                         aiRejected++;
-                        continue; // Skip this trade
+                        continue;
                     }
                     aiApproved++;
                 }
 
-                double tradeAmount = balance * 0.10;
-                positionQty = tradeAmount / currentPrice;
+                // Risk-based sizing: risk 1% of balance per trade
+                double riskPercent = 1.0;
+                double sl = signal.stopLoss() != null && signal.stopLoss() > 0
+                    ? signal.stopLoss() : currentPrice * 0.985; // default 1.5% SL
+                double tp = signal.takeProfit() != null && signal.takeProfit() > 0
+                    ? signal.takeProfit() : currentPrice * 1.03; // default 3% TP
+                double slDistance = Math.abs(currentPrice - sl);
+
+                double riskAmount = balance * (riskPercent / 100.0);
+                positionQty = slDistance > 0 ? riskAmount / slDistance : (balance * 0.10) / currentPrice;
+                // Cap at 10% of balance
+                double maxQty = (balance * 0.10) / currentPrice;
+                positionQty = Math.min(positionQty, maxQty);
+
                 entryPrice = currentPrice;
-                balance -= tradeAmount;
+                stopLossPrice = sl;
+                takeProfitPrice = tp;
+                balance -= positionQty * currentPrice;
                 inPosition = true;
             } else if (signal.signal() == TradingStrategy.Signal.SELL && inPosition) {
                 double sellValue = positionQty * currentPrice;
@@ -133,16 +174,8 @@ public class BacktestService {
                 if (pnl > 0) wins++;
                 else losses++;
 
-                Map<String, Object> trade = new LinkedHashMap<>();
-                trade.put("entryPrice", entryPrice);
-                trade.put("exitPrice", currentPrice);
-                trade.put("quantity", positionQty);
-                trade.put("pnl", Math.round(pnl * 100.0) / 100.0);
-                trade.put("side", pnl > 0 ? "WIN" : "LOSS");
-                result.getTrades().add(trade);
-
-                positionQty = 0;
-                entryPrice = 0;
+                addTrade(result, entryPrice, currentPrice, positionQty, pnl);
+                positionQty = 0; entryPrice = 0; stopLossPrice = 0; takeProfitPrice = 0;
             }
 
             double equity = balance + (inPosition ? positionQty * currentPrice : 0);
@@ -171,5 +204,15 @@ public class BacktestService {
         result.setAiRejected(aiRejected);
 
         return result;
+    }
+
+    private void addTrade(BacktestResult result, double entry, double exit, double qty, double pnl) {
+        Map<String, Object> trade = new LinkedHashMap<>();
+        trade.put("entryPrice", entry);
+        trade.put("exitPrice", exit);
+        trade.put("quantity", qty);
+        trade.put("pnl", Math.round(pnl * 100.0) / 100.0);
+        trade.put("side", pnl > 0 ? "WIN" : "LOSS");
+        result.getTrades().add(trade);
     }
 }
