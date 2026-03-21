@@ -1,8 +1,5 @@
 package com.tradeengine.service;
 
-import com.tradeengine.exchange.ExchangeClient;
-import com.tradeengine.exchange.ExchangeFactory;
-import com.tradeengine.ws.MarketDataStreamService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,7 +27,6 @@ import java.util.concurrent.atomic.AtomicLong;
  * Integration points:
  *   - KillSwitchService: blocked if active
  *   - CircuitBreakerService: blocked if open
- *   - RiskManagementService: feeds risk context
  *
  * Fail-safe: if AI evaluation throws, trade is SKIPPED (not approved).
  */
@@ -41,12 +37,10 @@ public class AITradeValidationService {
 
     private final KillSwitchService killSwitch;
     private final CircuitBreakerService circuitBreaker;
-    private final MarketDataStreamService streamService;
 
     private static final double MIN_CONFIDENCE = 0.65;
     private static final int MAX_DECISION_LOG_SIZE = 500;
 
-    // Decision log for analytics
     private final ConcurrentLinkedDeque<AIDecisionLog> decisionLog = new ConcurrentLinkedDeque<>();
     private final AtomicLong totalApproved = new AtomicLong(0);
     private final AtomicLong totalRejected = new AtomicLong(0);
@@ -83,17 +77,6 @@ public class AITradeValidationService {
     /**
      * Validate a trade signal through the AI multi-factor model.
      * Thread-safe and exchange-agnostic.
-     *
-     * @param side            "BUY" or "SELL"
-     * @param symbol          exchange-native symbol (e.g. BTCUSDT)
-     * @param exchange        exchange name (BINANCE, BYBIT, DELTA)
-     * @param closingPrices   entry-timeframe closing prices (oldest → newest)
-     * @param candles         entry-timeframe OHLCV (oldest → newest)
-     * @param higherTfPrices  higher-TF closing prices for MTF check (nullable)
-     * @param fundingRate     current funding rate (nullable)
-     * @param params          strategy params (may contain confidence threshold override)
-     * @param botId           bot UUID string for logging
-     * @return AIValidationResult with decision, confidence, reason
      */
     public AIValidationResult validate(
             String side, String symbol, String exchange,
@@ -130,48 +113,40 @@ public class AITradeValidationService {
             Map<String, Double> factors = new LinkedHashMap<>();
 
             // ─── Factor 1: Trend Alignment (weight 0.25) ───
-            double trendScore = scoreTrendAlignment(prices, last, price, isBuy);
-            factors.put("trend", trendScore);
+            factors.put("trend", scoreTrendAlignment(prices, last, price, isBuy));
 
             // ─── Factor 2: Volume Confirmation (weight 0.20) ───
-            double volumeScore = scoreVolumeConfirmation(candles, last);
-            factors.put("volume", volumeScore);
+            factors.put("volume", scoreVolumeConfirmation(candles, last));
 
             // ─── Factor 3: RSI Condition (weight 0.15) ───
-            double rsiScore = scoreRSICondition(prices, last, isBuy);
-            factors.put("rsi", rsiScore);
+            factors.put("rsi", scoreRSICondition(prices, last, isBuy));
 
             // ─── Factor 4: Volatility Regime (weight 0.15) ───
-            double volatilityScore = scoreVolatilityRegime(candles, last);
-            factors.put("volatility", volatilityScore);
+            factors.put("volatility", scoreVolatilityRegime(candles, last));
 
             // ─── Factor 5: Funding Rate Safety (weight 0.10) ───
-            double fundingScore = scoreFundingRate(fundingRate, isBuy, params);
-            factors.put("funding", fundingScore);
+            factors.put("funding", scoreFundingRate(fundingRate, isBuy, params));
 
             // ─── Factor 6: Multi-Timeframe Alignment (weight 0.15) ───
-            double mtfScore = scoreMTFAlignment(prices, last, higherTfPrices, isBuy);
-            factors.put("mtf", mtfScore);
+            factors.put("mtf", scoreMTFAlignment(prices, last, higherTfPrices, isBuy));
 
             // ─── Weighted Confidence ───
             double confidence =
-                trendScore * 0.25 +
-                volumeScore * 0.20 +
-                rsiScore * 0.15 +
-                volatilityScore * 0.15 +
-                fundingScore * 0.10 +
-                mtfScore * 0.15;
-
-            // Clamp to [0, 1]
+                factors.get("trend") * 0.25 +
+                factors.get("volume") * 0.20 +
+                factors.get("rsi") * 0.15 +
+                factors.get("volatility") * 0.15 +
+                factors.get("funding") * 0.10 +
+                factors.get("mtf") * 0.15;
             confidence = Math.max(0, Math.min(1, confidence));
 
             long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
 
             // ─── Hard rejection rules (override confidence) ───
             List<String> hardRejects = new ArrayList<>();
-            if (trendScore < 0.3) hardRejects.add("trend_misaligned");
-            if (volumeScore < 0.2) hardRejects.add("weak_volume");
-            if (volatilityScore < 0.2) hardRejects.add("low_volatility");
+            if (factors.get("trend") < 0.3) hardRejects.add("trend_misaligned");
+            if (factors.get("volume") < 0.2) hardRejects.add("weak_volume");
+            if (factors.get("volatility") < 0.2) hardRejects.add("low_volatility");
 
             if (!hardRejects.isEmpty()) {
                 String reason = String.format("HARD_REJECT: %s | confidence=%.3f | factors=%s",
@@ -179,35 +154,27 @@ public class AITradeValidationService {
                 return logAndReturn(botId, symbol, side, exchange, Decision.REJECT, confidence, reason, factors, latencyMs);
             }
 
-            // ─── Confidence threshold check ───
             if (confidence < minConfidence) {
                 String reason = String.format("LOW_CONFIDENCE: %.3f < %.3f | factors=%s",
                     confidence, minConfidence, formatFactors(factors));
                 return logAndReturn(botId, symbol, side, exchange, Decision.REJECT, confidence, reason, factors, latencyMs);
             }
 
-            // ─── APPROVED ───
             String reason = String.format("APPROVED: confidence=%.3f (min=%.3f) | factors=%s",
                 confidence, minConfidence, formatFactors(factors));
             return logAndReturn(botId, symbol, side, exchange, Decision.APPROVE, confidence, reason, factors, latencyMs);
 
         } catch (Exception e) {
-            // ─── FAIL-SAFE: AI error → skip trade ───
             totalErrors.incrementAndGet();
             long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
             log.error("[AI_VALIDATION_ERROR] botId={} symbol={} side={} error={} latency={}ms — SKIPPING TRADE",
                 botId, symbol, side, e.getMessage(), latencyMs, e);
-            return new AIValidationResult(Decision.REJECT, 0, "AI_ERROR: " + e.getMessage(),
-                Map.of(), latencyMs);
+            return new AIValidationResult(Decision.REJECT, 0, "AI_ERROR: " + e.getMessage(), Map.of(), latencyMs);
         }
     }
 
     // ─── Factor Scoring Methods ───
 
-    /**
-     * Factor 1: Trend alignment using EMA50/EMA200.
-     * Returns 0.0–1.0
-     */
     private double scoreTrendAlignment(double[] prices, int last, double price, boolean isBuy) {
         double ema50 = calculateEMA(prices, 50, last);
         double ema200 = calculateEMA(prices, 200, last);
@@ -217,8 +184,8 @@ public class AITradeValidationService {
         if (isBuy) {
             if (price > ema200) score += 0.35;
             if (price > ema50) score += 0.25;
-            if (ema50 > ema200) score += 0.25;  // Golden cross structure
-            if (ema200 > ema200Prev) score += 0.15; // EMA200 rising
+            if (ema50 > ema200) score += 0.25;
+            if (ema200 > ema200Prev) score += 0.15;
         } else {
             if (price < ema200) score += 0.35;
             if (price < ema50) score += 0.25;
@@ -228,17 +195,14 @@ public class AITradeValidationService {
         return Math.min(1.0, score);
     }
 
-    /**
-     * Factor 2: Volume confirmation — current volume vs 20-period VMA.
-     */
     private double scoreVolumeConfirmation(List<double[]> candles, int last) {
         if (last < 20) return 0.5;
         double[] volumes = candles.stream().mapToDouble(c -> c[5]).toArray();
         double vma = 0;
         for (int i = last - 20; i < last; i++) vma += volumes[i];
         vma /= 20;
-
         double ratio = vma > 0 ? volumes[last] / vma : 1;
+
         if (ratio >= 2.5) return 1.0;
         if (ratio >= 2.0) return 0.9;
         if (ratio >= 1.5) return 0.75;
@@ -247,16 +211,13 @@ public class AITradeValidationService {
         return 0.1;
     }
 
-    /**
-     * Factor 3: RSI condition — neutral zone (40–60) ideal.
-     */
     private double scoreRSICondition(double[] prices, int last, boolean isBuy) {
         double rsi = calculateRSI(prices, 14, last);
         if (isBuy) {
             if (rsi > 75) return 0.0;
             if (rsi > 70) return 0.15;
             if (rsi > 60) return 0.5;
-            if (rsi >= 40) return 1.0;  // Ideal zone
+            if (rsi >= 40) return 1.0;
             if (rsi >= 30) return 0.7;
             return 0.3;
         } else {
@@ -269,9 +230,6 @@ public class AITradeValidationService {
         }
     }
 
-    /**
-     * Factor 4: Volatility regime — moderate ATR is ideal, low = reject.
-     */
     private double scoreVolatilityRegime(List<double[]> candles, int last) {
         if (last < 34) return 0.5;
         double currentATR = calculateATR(candles, 14, last);
@@ -284,38 +242,28 @@ public class AITradeValidationService {
         avgATR = count > 0 ? avgATR / count : currentATR;
         double ratio = avgATR > 0 ? currentATR / avgATR : 1;
 
-        if (ratio < 0.4) return 0.1;    // Dead market
+        if (ratio < 0.4) return 0.1;
         if (ratio < 0.6) return 0.3;
         if (ratio < 0.8) return 0.6;
-        if (ratio <= 1.5) return 1.0;   // Ideal
+        if (ratio <= 1.5) return 1.0;
         if (ratio <= 2.5) return 0.5;
-        return 0.15;                     // Too volatile
+        return 0.15;
     }
 
-    /**
-     * Factor 5: Funding rate — extreme rates penalize trade direction.
-     */
     private double scoreFundingRate(BigDecimal fundingRate, boolean isBuy, Map<String, Object> params) {
-        if (fundingRate == null) return 0.7; // Unknown = slight penalty
+        if (fundingRate == null) return 0.7;
         double rate = fundingRate.doubleValue();
         double maxRate = getDouble(params, "maxFundingRate", 0.001);
 
-        if (Math.abs(rate) > maxRate * 2) return 0.0; // Extreme
+        if (Math.abs(rate) > maxRate * 2) return 0.0;
         if (Math.abs(rate) > maxRate) return 0.3;
-
-        // Positive funding = longs pay shorts (bearish pressure)
         if (isBuy && rate > 0.0005) return 0.5;
         if (!isBuy && rate < -0.0005) return 0.5;
-
-        return 1.0; // Safe range
+        return 1.0;
     }
 
-    /**
-     * Factor 6: Multi-timeframe alignment — entry TF trend must align with higher TF.
-     * Compares 1m vs 5m (or entry vs trend timeframe).
-     */
     private double scoreMTFAlignment(double[] entryPrices, int last, List<Double> higherTfPrices, boolean isBuy) {
-        if (higherTfPrices == null || higherTfPrices.size() < 50) return 0.5; // No data = neutral
+        if (higherTfPrices == null || higherTfPrices.size() < 50) return 0.5;
 
         double[] htfPrices = higherTfPrices.stream().mapToDouble(d -> d).toArray();
         int htfLast = htfPrices.length - 1;
