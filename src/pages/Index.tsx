@@ -8,6 +8,7 @@ import { TradeHistory } from "@/components/trading/TradeHistory";
 import { CreateBotDialog } from "@/components/trading/CreateBotDialog";
 import { NotificationPanel } from "@/components/trading/NotificationPanel";
 import { TradeQualityPanel } from "@/components/trading/TradeQualityPanel";
+import { AIValidationPanel } from "@/components/trading/AIValidationPanel";
 import { useBots } from "@/hooks/api/useBots";
 import { useAccountBalance } from "@/hooks/api/useAccountBalance";
 import { system } from "@/lib/api";
@@ -175,6 +176,7 @@ const Dashboard = () => {
         <div className="space-y-6">
           <ActiveBots />
           <TradeQualityPanel />
+          <AIValidationPanel />
           <NotificationPanel />
         </div>
       </div>
