@@ -250,6 +250,32 @@ public class StrategyRunner {
                 }
                 log.info("[QUALITY_PASSED] botId={} {}", bot.getId(), qualityScore.breakdown());
 
+                // --- AI Trade Validation Layer ---
+                List<Double> higherTfClosingPrices = null;
+                if (trendCandles != null && !trendCandles.isEmpty()) {
+                    higherTfClosingPrices = trendCandles.stream().map(c -> c[4]).collect(Collectors.toList());
+                }
+                BigDecimal aiFundingRate = null;
+                try {
+                    aiFundingRate = exchangeClient.getFundingRate(exchangeSymbol, exchangeBaseUrl);
+                } catch (Exception ignored) {}
+
+                AITradeValidationService.AIValidationResult aiResult = aiValidationService.validate(
+                    "BUY", exchangeSymbol, exchangeName,
+                    closingPrices, candles, higherTfClosingPrices, aiFundingRate,
+                    params, bot.getId().toString());
+
+                if (!aiResult.isApproved()) {
+                    log.info("[AI_REJECTED] botId={} symbol={} confidence={} reason={}",
+                        bot.getId(), exchangeSymbol, String.format("%.3f", aiResult.confidence()), aiResult.reason());
+                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                        "AI rejected: confidence=" + String.format("%.2f", aiResult.confidence()) + " — " + aiResult.reason());
+                    return;
+                }
+                log.info("[AI_APPROVED] botId={} confidence={} latency={}ms",
+                    bot.getId(), String.format("%.3f", aiResult.confidence()), aiResult.latencyMs());
+                params.put("__aiConfidence", aiResult.confidence());
+
                 // If strategy provides SL/TP (e.g. ENHANCED_EMA), inject into params
                 if (signal.stopLoss() != null) {
                     double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
