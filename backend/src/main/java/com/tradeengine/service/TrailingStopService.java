@@ -56,6 +56,27 @@ public class TrailingStopService {
      */
     public void resetBot(UUID botId) {
         highWaterMarks.remove(botId);
+        breakevenStops.remove(botId);
+    }
+
+    // Breakeven stop map: after TP1, SL moves to entry price
+    private final Map<UUID, BigDecimal> breakevenStops = new ConcurrentHashMap<>();
+
+    /**
+     * Set breakeven stop — after partial TP1, move SL to entry price.
+     */
+    public void setBreakevenStop(UUID botId, BigDecimal entryPrice) {
+        breakevenStops.put(botId, entryPrice);
+        // Also update the high water mark so trailing stop uses entry as floor
+        highWaterMarks.compute(botId, (id, existing) -> {
+            if (existing == null) return entryPrice;
+            return existing.max(entryPrice);
+        });
+        log.info("[BREAKEVEN_SL] botId={} stop moved to entry: {}", botId, entryPrice);
+    }
+
+    public BigDecimal getBreakevenStop(UUID botId) {
+        return breakevenStops.get(botId);
     }
 
     public BigDecimal getHighWaterMark(UUID botId) {
