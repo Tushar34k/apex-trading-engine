@@ -85,12 +85,31 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         double currentSlow = EmaCrossover.calculateEMA(prices, slowPeriod, last);
         double prevFast = EmaCrossover.calculateEMA(prices, fastPeriod, last - 1);
         double prevSlow = EmaCrossover.calculateEMA(prices, slowPeriod, last - 1);
+        double prevFast2 = last > 2 ? EmaCrossover.calculateEMA(prices, fastPeriod, last - 2) : prevFast;
+        double prevSlow2 = last > 2 ? EmaCrossover.calculateEMA(prices, slowPeriod, last - 2) : prevSlow;
         double currentTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last);
         double prevTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last - 1);
         double ema50 = EmaCrossover.calculateEMA(prices, 50, last);
 
         boolean crossedAbove = currentFast > currentSlow && prevFast <= prevSlow;
         boolean crossedBelow = currentFast < currentSlow && prevFast >= prevSlow;
+
+        // ─── 1b. EMA SLOPE FILTER (NEW) — both EMAs must slope in trade direction ───
+        double fastSlope = currentFast - prevFast;
+        double slowSlope = currentSlow - prevSlow;
+        double fastAccel = (currentFast - prevFast) - (prevFast - prevFast2); // acceleration
+
+        boolean emaSlopeUp = fastSlope > 0 && slowSlope > 0;
+        boolean emaSlopeDown = fastSlope < 0 && slowSlope < 0;
+
+        if (crossedAbove && !emaSlopeUp) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("EMA slope filter: fastSlope=%.4f slowSlope=%.4f — both must be positive for BUY", fastSlope, slowSlope));
+        }
+        if (crossedBelow && !emaSlopeDown) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("EMA slope filter: fastSlope=%.4f slowSlope=%.4f — both must be negative for SELL", fastSlope, slowSlope));
+        }
 
         // ─── 2. Trend Filter (EMA200 + EMA50 on entry TF) ───
         boolean trendUp = price > currentTrend && currentTrend > prevTrend && price > ema50;
