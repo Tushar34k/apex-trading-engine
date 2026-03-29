@@ -183,7 +183,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
                 String.format("RSI filter: RSI=%.1f < %.0f — oversold, skip SELL", rsi, rsiOversold));
         }
 
-        // ─── 8. Pullback Filter (NEW) — penalize entries far from EMA21 ───
+        // ─── 8. Pullback Filter (UPGRADED) — require pullback bounce, reject chasing ───
         double ema21 = EmaCrossover.calculateEMA(prices, 21, last);
         double pullbackDistance = Math.abs(price - ema21) / (currentATR > 0 ? currentATR : 1);
 
@@ -194,6 +194,22 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         if (crossedBelow && price < ema21 && pullbackDistance > maxPullbackATR) {
             return new SignalResult(Signal.HOLD, price,
                 String.format("Pullback filter: price %.1fATR from EMA21 (max %.1f) — chasing", pullbackDistance, maxPullbackATR));
+        }
+
+        // ─── 8b. Bounce Confirmation (NEW) — verify price bounced off EMA zone ───
+        // For BUY: previous candle low must have touched EMA21 zone (within 0.5 ATR), current candle closes above
+        if (crossedAbove && entryCandles.size() >= 3) {
+            double[] prevCandle = entryCandles.get(entryCandles.size() - 2);
+            double prevLow = prevCandle[3];
+            double prevEma21 = EmaCrossover.calculateEMA(prices, 21, last - 1);
+            double distFromEma = Math.abs(prevLow - prevEma21) / (currentATR > 0 ? currentATR : 1);
+            boolean touchedZone = distFromEma <= 1.0; // within 1 ATR of EMA21
+            boolean bounced = close > open && close > prevCandle[4]; // bullish close above prev close
+
+            if (!touchedZone && pullbackDistance > 0.5) {
+                return new SignalResult(Signal.HOLD, price,
+                    String.format("Bounce filter: prev candle %.1fATR from EMA21, no pullback touch — waiting for retest", distFromEma));
+            }
         }
 
         // ─── 9. Fake Breakout Protection — candle close above/below level ───
