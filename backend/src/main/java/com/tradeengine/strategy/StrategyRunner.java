@@ -60,7 +60,7 @@ public class StrategyRunner {
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
-    private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(60);
+    private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(120); // 2min cooldown to prevent overtrading
 
     // Bot processing locks — prevents concurrent execution per bot
     private final ConcurrentHashMap<UUID, Boolean> botLocks = new ConcurrentHashMap<>();
