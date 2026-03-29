@@ -221,9 +221,22 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         // ─── 10. Signal Decision ───
         String mtfTag = mtfResult.hasTrendData ? " | " + mtfResult.logTag : "";
 
+        // ─── 10b. Momentum Confirmation (NEW) — require strong candle + volume trend ───
+        // Current volume must be higher than previous candle volume (increasing momentum)
+        boolean volumeIncreasing = volumes.length >= 2 && currentVolume > volumes[volumes.length - 2];
+        // Candle body must be >50% of range (conviction, not indecision)
+        double bodyRatio = candleSize > 0 ? Math.abs(close - open) / candleSize : 0;
+        boolean strongCandle = bodyRatio > 0.50;
+
         // LONG signal
         if (!hasOpenPosition && crossedAbove && trendUp && volumeConfirmed && bullishCandle
-                && !spreadTooWide && !singleCandleSpike) {
+                && !spreadTooWide && !singleCandleSpike && strongCandle) {
+
+            // Additional momentum gate: reject if EMA acceleration is negative (decelerating)
+            if (fastAccel < 0) {
+                return new SignalResult(Signal.HOLD, price,
+                    String.format("Momentum decelerating: EMA9 accel=%.6f — waiting for strength", fastAccel));
+            }
 
             // ATR-based dynamic SL (replaces fixed swing low in many cases)
             double atrStopLoss = price - (currentATR * atrSlMultiplier);
@@ -242,10 +255,10 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             double tp1 = price + risk;
 
             String reason = String.format(
-                "LONG: EMA(%d)↑EMA(%d) | EMA200=%.2f ↑ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | PB=%.1fATR | SL=%.2f(ATR×%.1f) TP=%.2f R:R=1:%.1f TP1=%.2f%s",
-                fastPeriod, slowPeriod, currentTrend, ema50,
-                currentVolume, volumeMultiplier, rsi, currentATR, pullbackDistance,
-                stopLoss, atrSlMultiplier, takeProfit, rrRatio, tp1, mtfTag);
+                "LONG: EMA(%d)↑EMA(%d) slope=%.4f/%.4f accel=%.6f | EMA200=%.2f ↑ | EMA50=%.2f | Vol=%.0f>%.1f×VMA(%s) | RSI=%.1f | ATR=%.2f | PB=%.1fATR | body=%.0f%% | SL=%.2f TP=%.2f R:R=1:%.1f TP1=%.2f%s",
+                fastPeriod, slowPeriod, fastSlope, slowSlope, fastAccel, currentTrend, ema50,
+                currentVolume, volumeMultiplier, volumeIncreasing ? "↑" : "→", rsi, currentATR, pullbackDistance,
+                bodyRatio * 100, stopLoss, takeProfit, rrRatio, tp1, mtfTag);
 
             return new SignalResult(Signal.BUY, price, reason, stopLoss, takeProfit, "HIGH");
         }
