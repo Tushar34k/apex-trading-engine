@@ -56,7 +56,7 @@ public class TradeQualityScorer {
         double price = prices[last];
         boolean isBuy = "BUY".equalsIgnoreCase(side);
 
-        int minScore = getInt(params, "minTradeScore", 70);
+        int minScore = getInt(params, "minTradeScore", 75);
 
         // --- 1. Trend Alignment (25 pts) ---
         int trendScore = scoreTrend(prices, last, price, isBuy);

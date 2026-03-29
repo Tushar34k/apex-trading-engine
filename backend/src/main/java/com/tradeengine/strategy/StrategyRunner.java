@@ -60,7 +60,7 @@ public class StrategyRunner {
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
-    private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(60);
+    private static final Duration TRADE_COOLDOWN = Duration.ofSeconds(120); // 2min cooldown to prevent overtrading
 
     // Bot processing locks — prevents concurrent execution per bot
     private final ConcurrentHashMap<UUID, Boolean> botLocks = new ConcurrentHashMap<>();
@@ -435,13 +435,36 @@ public class StrategyRunner {
             bot.getId(), exchangeSymbol, quantity, currentPrice, exchangeName,
             signal.confidence() != null ? signal.confidence() : "N/A");
 
+        // --- Order type selection: prefer LIMIT at pullback zone for better fills ---
+        String orderType = "MARKET";
+        BigDecimal limitPrice = null;
+        boolean useLimitEntry = params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry"));
+
+        if (useLimitEntry && signal.stopLoss() != null) {
+            // Place limit order between current price and SL (midpoint = pullback zone)
+            double midpoint = (signal.price() + signal.stopLoss()) / 2.0;
+            double buffer = currentPrice.doubleValue() * 0.001; // 0.1% buffer
+            double limitTarget = Math.max(midpoint + buffer, signal.stopLoss()); // never below SL
+            limitPrice = BigDecimal.valueOf(limitTarget).setScale(8, RoundingMode.HALF_UP);
+            if (symbolInfo != null) limitPrice = symbolInfo.roundPrice(limitPrice);
+            // Only use limit if it gives a better price than market
+            if (limitPrice.compareTo(currentPrice) < 0) {
+                orderType = "LIMIT";
+                log.info("[LIMIT_ENTRY] botId={} symbol={} limitPrice={} vs market={}",
+                    bot.getId(), exchangeSymbol, limitPrice, currentPrice);
+            } else {
+                limitPrice = null; // fallback to market
+            }
+        }
+
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
             .userId(bot.getUserId())
             .symbol(exchangeSymbol)
             .side("BUY")
             .quantity(quantity)
-            .orderType("MARKET")
+            .orderType(orderType)
+            .price(limitPrice)
             .apiKey(apiKey)
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)

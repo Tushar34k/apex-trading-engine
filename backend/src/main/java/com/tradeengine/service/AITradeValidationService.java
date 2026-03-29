@@ -34,7 +34,7 @@ public class AITradeValidationService {
     private final KillSwitchService killSwitch;
     private final CircuitBreakerService circuitBreaker;
 
-    private static final double MIN_CONFIDENCE = 0.65;
+    private static final double MIN_CONFIDENCE = 0.75;
     private static final int MAX_DECISION_LOG_SIZE = 500;
 
     private final ConcurrentLinkedDeque<AIDecisionLog> decisionLog = new ConcurrentLinkedDeque<>();

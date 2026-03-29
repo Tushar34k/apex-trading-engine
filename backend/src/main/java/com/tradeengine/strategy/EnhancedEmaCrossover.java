@@ -85,12 +85,31 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         double currentSlow = EmaCrossover.calculateEMA(prices, slowPeriod, last);
         double prevFast = EmaCrossover.calculateEMA(prices, fastPeriod, last - 1);
         double prevSlow = EmaCrossover.calculateEMA(prices, slowPeriod, last - 1);
+        double prevFast2 = last > 2 ? EmaCrossover.calculateEMA(prices, fastPeriod, last - 2) : prevFast;
+        double prevSlow2 = last > 2 ? EmaCrossover.calculateEMA(prices, slowPeriod, last - 2) : prevSlow;
         double currentTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last);
         double prevTrend = EmaCrossover.calculateEMA(prices, trendPeriod, last - 1);
         double ema50 = EmaCrossover.calculateEMA(prices, 50, last);
 
         boolean crossedAbove = currentFast > currentSlow && prevFast <= prevSlow;
         boolean crossedBelow = currentFast < currentSlow && prevFast >= prevSlow;
+
+        // ─── 1b. EMA SLOPE FILTER (NEW) — both EMAs must slope in trade direction ───
+        double fastSlope = currentFast - prevFast;
+        double slowSlope = currentSlow - prevSlow;
+        double fastAccel = (currentFast - prevFast) - (prevFast - prevFast2); // acceleration
+
+        boolean emaSlopeUp = fastSlope > 0 && slowSlope > 0;
+        boolean emaSlopeDown = fastSlope < 0 && slowSlope < 0;
+
+        if (crossedAbove && !emaSlopeUp) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("EMA slope filter: fastSlope=%.4f slowSlope=%.4f — both must be positive for BUY", fastSlope, slowSlope));
+        }
+        if (crossedBelow && !emaSlopeDown) {
+            return new SignalResult(Signal.HOLD, price,
+                String.format("EMA slope filter: fastSlope=%.4f slowSlope=%.4f — both must be negative for SELL", fastSlope, slowSlope));
+        }
 
         // ─── 2. Trend Filter (EMA200 + EMA50 on entry TF) ───
         boolean trendUp = price > currentTrend && currentTrend > prevTrend && price > ema50;
@@ -164,7 +183,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
                 String.format("RSI filter: RSI=%.1f < %.0f — oversold, skip SELL", rsi, rsiOversold));
         }
 
-        // ─── 8. Pullback Filter (NEW) — penalize entries far from EMA21 ───
+        // ─── 8. Pullback Filter (UPGRADED) — require pullback bounce, reject chasing ───
         double ema21 = EmaCrossover.calculateEMA(prices, 21, last);
         double pullbackDistance = Math.abs(price - ema21) / (currentATR > 0 ? currentATR : 1);
 
@@ -177,6 +196,22 @@ public class EnhancedEmaCrossover implements TradingStrategy {
                 String.format("Pullback filter: price %.1fATR from EMA21 (max %.1f) — chasing", pullbackDistance, maxPullbackATR));
         }
 
+        // ─── 8b. Bounce Confirmation (NEW) — verify price bounced off EMA zone ───
+        // For BUY: previous candle low must have touched EMA21 zone (within 0.5 ATR), current candle closes above
+        if (crossedAbove && entryCandles.size() >= 3) {
+            double[] prevCandle = entryCandles.get(entryCandles.size() - 2);
+            double prevLow = prevCandle[3];
+            double prevEma21 = EmaCrossover.calculateEMA(prices, 21, last - 1);
+            double distFromEma = Math.abs(prevLow - prevEma21) / (currentATR > 0 ? currentATR : 1);
+            boolean touchedZone = distFromEma <= 1.0; // within 1 ATR of EMA21
+            boolean bounced = close > open && close > prevCandle[4]; // bullish close above prev close
+
+            if (!touchedZone && pullbackDistance > 0.5) {
+                return new SignalResult(Signal.HOLD, price,
+                    String.format("Bounce filter: prev candle %.1fATR from EMA21, no pullback touch — waiting for retest", distFromEma));
+            }
+        }
+
         // ─── 9. Fake Breakout Protection — candle close above/below level ───
         // For BUY: close must be > previous swing high (not just wick)
         // For SELL: close must be < previous swing low (not just wick)
@@ -186,9 +221,22 @@ public class EnhancedEmaCrossover implements TradingStrategy {
         // ─── 10. Signal Decision ───
         String mtfTag = mtfResult.hasTrendData ? " | " + mtfResult.logTag : "";
 
+        // ─── 10b. Momentum Confirmation (NEW) — require strong candle + volume trend ───
+        // Current volume must be higher than previous candle volume (increasing momentum)
+        boolean volumeIncreasing = volumes.length >= 2 && currentVolume > volumes[volumes.length - 2];
+        // Candle body must be >50% of range (conviction, not indecision)
+        double bodyRatio = candleSize > 0 ? Math.abs(close - open) / candleSize : 0;
+        boolean strongCandle = bodyRatio > 0.50;
+
         // LONG signal
         if (!hasOpenPosition && crossedAbove && trendUp && volumeConfirmed && bullishCandle
-                && !spreadTooWide && !singleCandleSpike) {
+                && !spreadTooWide && !singleCandleSpike && strongCandle) {
+
+            // Additional momentum gate: reject if EMA acceleration is negative (decelerating)
+            if (fastAccel < 0) {
+                return new SignalResult(Signal.HOLD, price,
+                    String.format("Momentum decelerating: EMA9 accel=%.6f — waiting for strength", fastAccel));
+            }
 
             // ATR-based dynamic SL (replaces fixed swing low in many cases)
             double atrStopLoss = price - (currentATR * atrSlMultiplier);
@@ -207,17 +255,17 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             double tp1 = price + risk;
 
             String reason = String.format(
-                "LONG: EMA(%d)↑EMA(%d) | EMA200=%.2f ↑ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | PB=%.1fATR | SL=%.2f(ATR×%.1f) TP=%.2f R:R=1:%.1f TP1=%.2f%s",
-                fastPeriod, slowPeriod, currentTrend, ema50,
-                currentVolume, volumeMultiplier, rsi, currentATR, pullbackDistance,
-                stopLoss, atrSlMultiplier, takeProfit, rrRatio, tp1, mtfTag);
+                "LONG: EMA(%d)↑EMA(%d) slope=%.4f/%.4f accel=%.6f | EMA200=%.2f ↑ | EMA50=%.2f | Vol=%.0f>%.1f×VMA(%s) | RSI=%.1f | ATR=%.2f | PB=%.1fATR | body=%.0f%% | SL=%.2f TP=%.2f R:R=1:%.1f TP1=%.2f%s",
+                fastPeriod, slowPeriod, fastSlope, slowSlope, fastAccel, currentTrend, ema50,
+                currentVolume, volumeMultiplier, volumeIncreasing ? "↑" : "→", rsi, currentATR, pullbackDistance,
+                bodyRatio * 100, stopLoss, takeProfit, rrRatio, tp1, mtfTag);
 
             return new SignalResult(Signal.BUY, price, reason, stopLoss, takeProfit, "HIGH");
         }
 
         // SHORT signal
         if (hasOpenPosition && crossedBelow && trendDown && volumeConfirmed && bearishCandle
-                && !spreadTooWide && !singleCandleSpike) {
+                && !spreadTooWide && !singleCandleSpike && strongCandle) {
 
             double atrStopLoss = price + (currentATR * atrSlMultiplier);
             double swingHigh = findSwingHigh(entryCandles, swingLookback);
@@ -230,9 +278,9 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             double takeProfit = price - (risk * rrRatio);
 
             String reason = String.format(
-                "SHORT: EMA(%d)↓EMA(%d) | EMA200=%.2f ↓ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | SL=%.2f TP=%.2f R:R=1:%.1f%s",
-                fastPeriod, slowPeriod, currentTrend, ema50,
-                currentVolume, volumeMultiplier, rsi, currentATR,
+                "SHORT: EMA(%d)↓EMA(%d) slope=%.4f/%.4f | EMA200=%.2f ↓ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | body=%.0f%% | SL=%.2f TP=%.2f R:R=1:%.1f%s",
+                fastPeriod, slowPeriod, fastSlope, slowSlope, currentTrend, ema50,
+                currentVolume, volumeMultiplier, rsi, currentATR, bodyRatio * 100,
                 stopLoss, takeProfit, rrRatio, mtfTag);
 
             return new SignalResult(Signal.SELL, price, reason, stopLoss, takeProfit, "HIGH");
