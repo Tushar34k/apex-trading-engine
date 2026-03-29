@@ -265,7 +265,7 @@ public class EnhancedEmaCrossover implements TradingStrategy {
 
         // SHORT signal
         if (hasOpenPosition && crossedBelow && trendDown && volumeConfirmed && bearishCandle
-                && !spreadTooWide && !singleCandleSpike) {
+                && !spreadTooWide && !singleCandleSpike && strongCandle) {
 
             double atrStopLoss = price + (currentATR * atrSlMultiplier);
             double swingHigh = findSwingHigh(entryCandles, swingLookback);
@@ -278,9 +278,9 @@ public class EnhancedEmaCrossover implements TradingStrategy {
             double takeProfit = price - (risk * rrRatio);
 
             String reason = String.format(
-                "SHORT: EMA(%d)↓EMA(%d) | EMA200=%.2f ↓ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | SL=%.2f TP=%.2f R:R=1:%.1f%s",
-                fastPeriod, slowPeriod, currentTrend, ema50,
-                currentVolume, volumeMultiplier, rsi, currentATR,
+                "SHORT: EMA(%d)↓EMA(%d) slope=%.4f/%.4f | EMA200=%.2f ↓ | EMA50=%.2f | Vol=%.0f>%.1f×VMA | RSI=%.1f | ATR=%.2f | body=%.0f%% | SL=%.2f TP=%.2f R:R=1:%.1f%s",
+                fastPeriod, slowPeriod, fastSlope, slowSlope, currentTrend, ema50,
+                currentVolume, volumeMultiplier, rsi, currentATR, bodyRatio * 100,
                 stopLoss, takeProfit, rrRatio, mtfTag);
 
             return new SignalResult(Signal.SELL, price, reason, stopLoss, takeProfit, "HIGH");

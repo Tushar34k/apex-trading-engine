@@ -435,13 +435,37 @@ public class StrategyRunner {
             bot.getId(), exchangeSymbol, quantity, currentPrice, exchangeName,
             signal.confidence() != null ? signal.confidence() : "N/A");
 
+        // --- Order type selection: prefer LIMIT at pullback zone for better fills ---
+        String orderType = "MARKET";
+        BigDecimal limitPrice = null;
+        boolean useLimitEntry = params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry"));
+
+        if (useLimitEntry && signal.stopLoss() != null) {
+            // Place limit order at EMA21 zone (slightly above for buffer)
+            double ema21Val = EmaCrossover.calculateEMA(
+                candles.stream().mapToDouble(c -> c[4]).toArray(), 21, candles.size() - 1);
+            double buffer = currentPrice.doubleValue() * 0.001; // 0.1% buffer above EMA21
+            double limitTarget = Math.max(ema21Val + buffer, signal.stopLoss()); // never below SL
+            limitPrice = BigDecimal.valueOf(limitTarget).setScale(8, RoundingMode.HALF_UP);
+            if (symbolInfo != null) limitPrice = symbolInfo.roundPrice(limitPrice);
+            // Only use limit if it gives a better price than market
+            if (limitPrice.compareTo(currentPrice) < 0) {
+                orderType = "LIMIT";
+                log.info("[LIMIT_ENTRY] botId={} symbol={} limitPrice={} vs market={} (EMA21={})",
+                    bot.getId(), exchangeSymbol, limitPrice, currentPrice, ema21Val);
+            } else {
+                limitPrice = null; // fallback to market
+            }
+        }
+
         TradeRequest request = TradeRequest.builder()
             .botId(bot.getId())
             .userId(bot.getUserId())
             .symbol(exchangeSymbol)
             .side("BUY")
             .quantity(quantity)
-            .orderType("MARKET")
+            .orderType(orderType)
+            .price(limitPrice)
             .apiKey(apiKey)
             .apiSecret(secret)
             .exchangeBaseUrl(exchangeBaseUrl)
