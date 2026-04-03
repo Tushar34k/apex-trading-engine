@@ -216,6 +216,23 @@ public class RiskManagementService {
         return consecutive;
     }
 
+    private int countHourlyTrades(TradingBot bot) {
+        Instant oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+        return (int) positionRepo.findByBotId(bot.getId()).stream()
+            .filter(p -> p.getOpenedAt() != null && p.getOpenedAt().isAfter(oneHourAgo))
+            .count();
+    }
+
+    private Instant getLastLossTime(TradingBot bot) {
+        List<TradePosition> positions = positionRepo.findByBotId(bot.getId());
+        return positions.stream()
+            .filter(p -> "CLOSED".equals(p.getStatus()) && p.getRealizedPnl() != null && p.getClosedAt() != null)
+            .filter(p -> p.getRealizedPnl().compareTo(BigDecimal.ZERO) < 0)
+            .map(TradePosition::getClosedAt)
+            .max(Instant::compareTo)
+            .orElse(null);
+    }
+
     private int getInt(Map<String, Object> params, String key, int defaultVal) {
         Object val = params.get(key);
         return val instanceof Number ? ((Number) val).intValue() : defaultVal;
