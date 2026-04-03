@@ -260,13 +260,31 @@ public class StrategyRunner {
             }
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
+
+                // ═══ CRITICAL: Reject trades without stop loss ═══
+                if (signal.stopLoss() == null || signal.stopLoss() <= 0) {
+                    log.warn("[RISK_REJECTED] botId={} symbol={} NO STOP LOSS — trade blocked", bot.getId(), exchangeSymbol);
+                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                        "No stop loss defined — every trade MUST have SL");
+                    return;
+                }
+
+                // ═══ R:R and SL distance validation (BEFORE any scoring) ═══
+                RiskManagementService.RiskCheck rrCheck = riskService.validateRiskReward(
+                    bot, signal.price(), signal.stopLoss(), signal.takeProfit(), params);
+                if (!rrCheck.allowed()) {
+                    log.info("[RR_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, rrCheck.reason());
+                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(), rrCheck.reason());
+                    return;
+                }
+
                 // --- Trade Quality Score gate ---
                 TradeQualityScorer.QualityScore qualityScore = tradeQualityScorer.score(
                     closingPrices, candles, "BUY", params);
                 if (!qualityScore.passed()) {
                     log.info("[QUALITY_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, qualityScore.breakdown());
                     notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
-                        "Trade quality too low: " + qualityScore.total() + "/100 (min " + params.getOrDefault("minTradeScore", 70) + ")");
+                        "Trade quality too low: " + qualityScore.total() + "/100 (min " + params.getOrDefault("minTradeScore", 75) + ")");
                     return;
                 }
                 log.info("[QUALITY_PASSED] botId={} {}", bot.getId(), qualityScore.breakdown());
@@ -297,17 +315,15 @@ public class StrategyRunner {
                     bot.getId(), String.format("%.3f", aiResult.confidence()), aiResult.latencyMs());
                 params.put("__aiConfidence", aiResult.confidence());
 
-                // If strategy provides SL/TP (e.g. ENHANCED_EMA), inject into params
-                if (signal.stopLoss() != null) {
-                    double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
-                    params.put("stopLossPercent", slPercent);
-                }
+                // Inject SL/TP from strategy signal
+                double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
+                params.put("stopLossPercent", slPercent);
                 if (signal.takeProfit() != null) {
                     double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
                     params.put("takeProfitPercent", tpPercent);
                 }
                 // Store TP1 (1:1 R:R) for partial profit booking
-                if (signal.stopLoss() != null && signal.takeProfit() != null) {
+                if (signal.takeProfit() != null) {
                     double risk = Math.abs(signal.price() - signal.stopLoss());
                     double tp1 = signal.price() + risk; // 1:1 R:R
                     params.put("__tp1Price", tp1);
