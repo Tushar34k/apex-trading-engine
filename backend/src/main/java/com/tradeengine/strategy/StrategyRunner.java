@@ -405,32 +405,28 @@ public class StrategyRunner {
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        // --- Risk-based position sizing ---
-        // If SL is available, size position so max loss = riskPercent% of balance
-        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 1.0); // default 1%
+        // --- Risk-based position sizing (STRICT) ---
+        // SL is MANDATORY at this point (validated above), so always use risk-based sizing
+        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // default 0.5% — conservative
         BigDecimal quantity;
 
-        if (signal.stopLoss() != null && signal.stopLoss() > 0) {
-            BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
-            BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
-            if (slDistance.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
-                // Also cap by tradeSizePercent allocation
-                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
-                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
-                BigDecimal maxQty = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
-                quantity = riskBasedQty.min(maxQty);
-                log.info("[RISK_SIZING] botId={} riskAmt={} slDist={} riskQty={} maxQty={} finalQty={}",
-                    bot.getId(), riskAmount, slDistance, riskBasedQty, maxQty, quantity);
-            } else {
-                BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
-                    .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
-                quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
-            }
+        BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
+        BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
+
+        if (slDistance.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
+
+            // Hard cap: never exceed 5% of balance in a single position
+            BigDecimal maxAllocation = usdtBalance.multiply(BigDecimal.valueOf(0.05)); // 5% hard cap
+            BigDecimal maxQty = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
+            quantity = riskBasedQty.min(maxQty);
+
+            log.info("[RISK_SIZING] botId={} balance={} risk={}% riskAmt={} slDist={} riskQty={} maxQty={} finalQty={}",
+                bot.getId(), usdtBalance.setScale(2, RoundingMode.HALF_UP), riskPercent,
+                riskAmount.setScale(2, RoundingMode.HALF_UP), slDistance, riskBasedQty, maxQty, quantity);
         } else {
-            BigDecimal allocationAmount = usdtBalance.multiply(bot.getTradeSizePercent())
-                .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
-            quantity = allocationAmount.divide(currentPrice, 8, RoundingMode.DOWN);
+            log.warn("Bot {}: SL distance is zero — should not reach here", bot.getId());
+            return;
         }
 
         quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
