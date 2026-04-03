@@ -851,9 +851,23 @@ public class StrategyRunner {
             }
         }
 
+        // ═══ CRITICAL: Validate exit fill data ═══
+        if (result.getAvgPrice() == null || result.getAvgPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            log.error("[FATAL_BUG] botId={} SELL filled with avgPrice={} — PnL will be inaccurate",
+                freshBot.getId(), result.getAvgPrice());
+        }
+
+        // ═══ PnL calculation: use executedQty (actual fill), not bot.getQuantity() (stale on partial fills) ═══
         BigDecimal pnl = BigDecimal.ZERO;
-        if (freshBot.getEntryPrice() != null) {
-            pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(freshBot.getQuantity());
+        BigDecimal exitQty = result.getExecutedQty() != null ? result.getExecutedQty() : freshBot.getQuantity();
+        if (freshBot.getEntryPrice() != null && freshBot.getEntryPrice().compareTo(BigDecimal.ZERO) > 0
+            && result.getAvgPrice() != null && result.getAvgPrice().compareTo(BigDecimal.ZERO) > 0) {
+            pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(exitQty);
+            log.info("[PNL_CALC] botId={} entry={} exit={} qty={} pnl={}",
+                freshBot.getId(), freshBot.getEntryPrice(), result.getAvgPrice(), exitQty, pnl);
+        } else {
+            log.error("[PNL_CORRUPT] botId={} entry={} exit={} — cannot compute PnL",
+                freshBot.getId(), freshBot.getEntryPrice(), result.getAvgPrice());
         }
 
         // Search by botId + OPEN status (more reliable than symbol match for multi-exchange)
