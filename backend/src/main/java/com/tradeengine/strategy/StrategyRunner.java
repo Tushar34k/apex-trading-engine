@@ -654,8 +654,51 @@ public class StrategyRunner {
                                    String apiKey, String apiSecret,
                                    String exchangeName, String exchangeMode, String exchangeBaseUrl,
                                    Map<String, Object> params, String exchangeSymbol) {
+        // ═══ CRITICAL: Validate fill data before persisting ═══
+        if (result.getAvgPrice() == null || result.getAvgPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            log.error("[FATAL_BUG] botId={} BUY filled with avgPrice={} — REJECTING fill to prevent PnL corruption",
+                bot.getId(), result.getAvgPrice());
+            killSwitch.recordTradeFailure();
+            return;
+        }
+        if (result.getExecutedQty() == null || result.getExecutedQty().compareTo(BigDecimal.ZERO) <= 0) {
+            log.error("[FATAL_BUG] botId={} BUY filled with executedQty={} — REJECTING fill",
+                bot.getId(), result.getExecutedQty());
+            killSwitch.recordTradeFailure();
+            return;
+        }
+
+        // ═══ Slippage guard — REJECT if too high (not just log) ═══
+        BigDecimal expectedPrice = BigDecimal.valueOf(
+            params.containsKey("__signalPrice") ? ((Number) params.get("__signalPrice")).doubleValue() : 0);
+        if (expectedPrice.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal entrySlippage = result.getAvgPrice().subtract(expectedPrice).abs()
+                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+            double maxSlippagePct = getDoubleParam(params, "maxSlippagePercent", 0.5);
+            if (entrySlippage.doubleValue() > maxSlippagePct) {
+                log.error("[SLIPPAGE_REJECTED] botId={} symbol={} expected={} filled={} slippage={}% > max={}% — CLOSING position immediately",
+                    bot.getId(), exchangeSymbol, expectedPrice, result.getAvgPrice(), entrySlippage, maxSlippagePct);
+                // Immediately reverse the position — slippage too high
+                notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                    "Slippage " + entrySlippage + "% exceeded max " + maxSlippagePct + "% — position reversed");
+                // Submit a market sell to close the bad entry
+                SymbolInfo symInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
+                submitSell(bot, apiKey, apiSecret, result.getAvgPrice(),
+                    "Slippage rejection — immediate close", exchangeBaseUrl, symInfo, "BOT_SLIPPAGE_EXIT", exchangeName, exchangeSymbol);
+                return;
+            }
+            if (entrySlippage.doubleValue() > 0.2) {
+                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
+                    bot.getId(), exchangeSymbol, expectedPrice, result.getAvgPrice(), entrySlippage);
+            }
+        }
+
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
+
+        String orderType = params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry"))
+            ? "LIMIT" : "MARKET";
 
         TradeOrder order = new TradeOrder();
         order.setBotId(freshBot.getId());
@@ -663,7 +706,7 @@ public class StrategyRunner {
         order.setExchangeOrderId(result.getOrderId());
         order.setSymbol(freshBot.getSymbol());
         order.setSide("BUY");
-        order.setType("MARKET");
+        order.setType(orderType);
         order.setQuantity(result.getExecutedQty());
         order.setFilledQuantity(result.getExecutedQty());
         order.setAvgFillPrice(result.getAvgPrice());
@@ -671,8 +714,8 @@ public class StrategyRunner {
         order.setFilledAt(Instant.now());
         orderRepo.save(order);
 
-        log.info("[TRADE_EXECUTED] botId={} symbol={} side=BUY qty={} avgPrice={} orderId={}",
-            freshBot.getId(), exchangeSymbol, result.getExecutedQty(), result.getAvgPrice(), result.getOrderId());
+        log.info("[TRADE_EXECUTED] botId={} symbol={} side=BUY qty={} avgPrice={} orderId={} type={}",
+            freshBot.getId(), exchangeSymbol, result.getExecutedQty(), result.getAvgPrice(), result.getOrderId(), orderType);
 
         freshBot.setHasOpenPosition(true);
         freshBot.setEntryPrice(result.getAvgPrice());
@@ -691,37 +734,33 @@ public class StrategyRunner {
         position.setCurrentPrice(result.getAvgPrice());
         positionRepo.save(position);
 
-        // --- Slippage guard on entry ---
-        BigDecimal expectedPrice = BigDecimal.valueOf(
-            params.containsKey("__signalPrice") ? ((Number) params.get("__signalPrice")).doubleValue() : 0);
-        if (expectedPrice.compareTo(BigDecimal.ZERO) > 0 && result.getAvgPrice() != null) {
-            BigDecimal entrySlippage = result.getAvgPrice().subtract(expectedPrice).abs()
-                .divide(expectedPrice, 6, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
-            if (entrySlippage.doubleValue() > 0.5) {
-                log.warn("[SLIPPAGE_WARNING] botId={} symbol={} expected={} filled={} slippage={}%",
-                    freshBot.getId(), exchangeSymbol, expectedPrice, result.getAvgPrice(), entrySlippage);
-            }
+        // ═══ Calculate SL/TP from strategy signal (NO hardcoded fallbacks) ═══
+        BigDecimal slPrice;
+        BigDecimal tpPrice;
+
+        if (params.containsKey("stopLossPercent")) {
+            slPrice = result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
+                BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)));
+        } else {
+            // Should never reach here — SL is mandatory. But fail-safe with tight SL.
+            log.error("[RISK_BUG] botId={} No stopLossPercent in params — using emergency 0.5% SL", freshBot.getId());
+            slPrice = result.getAvgPrice().multiply(BigDecimal.valueOf(0.995));
         }
 
-        // --- Calculate SL/TP prices ---
-        double defaultSlPercent = 0.7;
-        double defaultTpPercent = 1.4;
-        BigDecimal slPrice = params.containsKey("stopLossPercent")
-            ? result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
-                BigDecimal.valueOf(((Number) params.get("stopLossPercent")).doubleValue() / 100)))
-            : result.getAvgPrice().multiply(BigDecimal.ONE.subtract(
-                BigDecimal.valueOf(defaultSlPercent / 100)));
-        BigDecimal tpPrice = params.containsKey("takeProfitPercent")
-            ? result.getAvgPrice().multiply(BigDecimal.ONE.add(
-                BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)))
-            : result.getAvgPrice().multiply(BigDecimal.ONE.add(
-                BigDecimal.valueOf(defaultTpPercent / 100)));
+        if (params.containsKey("takeProfitPercent")) {
+            tpPrice = result.getAvgPrice().multiply(BigDecimal.ONE.add(
+                BigDecimal.valueOf(((Number) params.get("takeProfitPercent")).doubleValue() / 100)));
+        } else {
+            // Default TP = 2x the SL distance (enforcing minimum 1:2 R:R)
+            BigDecimal slDist = result.getAvgPrice().subtract(slPrice);
+            tpPrice = result.getAvgPrice().add(slDist.multiply(BigDecimal.valueOf(2)));
+        }
+
         BigDecimal trailingPct = params.containsKey("trailingStopPercent")
             ? BigDecimal.valueOf(((Number) params.get("trailingStopPercent")).doubleValue())
             : null;
 
-        // Round SL/TP to exchange tick size (not hardcoded 2dp)
+        // Round SL/TP to exchange tick size
         SymbolInfo symInfo = symbolRegistry.getOrFetch(exchangeName, exchangeSymbol, exchangeBaseUrl);
         if (symInfo != null) {
             slPrice = symInfo.roundPrice(slPrice);
@@ -732,14 +771,12 @@ public class StrategyRunner {
         try {
             ExchangeClient client = exchangeFactory.getClient(exchangeName);
 
-            // STOP_MARKET for stop loss (reduceOnly=true built into the method)
             OrderResponse slOrder = client.placeStopMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
                 result.getExecutedQty(), slPrice, exchangeBaseUrl);
             log.info("[STOP_LOSS_PLACED] botId={} symbol={} stopPrice={} orderId={}",
                 freshBot.getId(), exchangeSymbol, slPrice, slOrder.getOrderId());
 
-            // TAKE_PROFIT_MARKET for take profit (reduceOnly=true built into the method)
             OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
                 result.getExecutedQty(), tpPrice, exchangeBaseUrl);
@@ -749,10 +786,9 @@ public class StrategyRunner {
         } catch (Exception e) {
             log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",
                 freshBot.getId(), exchangeSymbol, e.getMessage());
-            // Fall back to internal monitoring — PositionRiskManager will still watch this position
         }
 
-        // Register with PositionTracker for real-time risk monitoring (backup to exchange orders)
+        // Register with PositionTracker for real-time risk monitoring
         positionTracker.registerPosition(PositionTracker.TrackedPosition.builder()
             .botId(freshBot.getId())
             .userId(freshBot.getUserId())
@@ -778,9 +814,11 @@ public class StrategyRunner {
         notificationService.notifyBuy(freshBot.getUserId().toString(), freshBot.getName(), freshBot.getSymbol(),
             result.getAvgPrice(), result.getExecutedQty());
 
-        log.info("Bot {} [{}]: BUY filled via queue. Entry={}, Qty={}, SL={}, TP={}",
-            freshBot.getId(), freshBot.getName(), result.getAvgPrice(), result.getExecutedQty(),
-            slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP));
+        log.info("[BUY_COMPLETE] botId={} symbol={} entry={} qty={} SL={} TP={} R:R=1:{}",
+            freshBot.getId(), exchangeSymbol, result.getAvgPrice(), result.getExecutedQty(),
+            slPrice.setScale(2, RoundingMode.HALF_UP), tpPrice.setScale(2, RoundingMode.HALF_UP),
+            String.format("%.1f", tpPrice.subtract(result.getAvgPrice()).doubleValue() /
+                Math.max(0.0001, result.getAvgPrice().subtract(slPrice).doubleValue())));
     }
 
     private void handleSellFilled(TradingBot bot, TradeRequest.TradeResult result, String notificationType, BigDecimal currentPrice) {
@@ -813,9 +851,23 @@ public class StrategyRunner {
             }
         }
 
+        // ═══ CRITICAL: Validate exit fill data ═══
+        if (result.getAvgPrice() == null || result.getAvgPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            log.error("[FATAL_BUG] botId={} SELL filled with avgPrice={} — PnL will be inaccurate",
+                freshBot.getId(), result.getAvgPrice());
+        }
+
+        // ═══ PnL calculation: use executedQty (actual fill), not bot.getQuantity() (stale on partial fills) ═══
         BigDecimal pnl = BigDecimal.ZERO;
-        if (freshBot.getEntryPrice() != null) {
-            pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(freshBot.getQuantity());
+        BigDecimal exitQty = result.getExecutedQty() != null ? result.getExecutedQty() : freshBot.getQuantity();
+        if (freshBot.getEntryPrice() != null && freshBot.getEntryPrice().compareTo(BigDecimal.ZERO) > 0
+            && result.getAvgPrice() != null && result.getAvgPrice().compareTo(BigDecimal.ZERO) > 0) {
+            pnl = result.getAvgPrice().subtract(freshBot.getEntryPrice()).multiply(exitQty);
+            log.info("[PNL_CALC] botId={} entry={} exit={} qty={} pnl={}",
+                freshBot.getId(), freshBot.getEntryPrice(), result.getAvgPrice(), exitQty, pnl);
+        } else {
+            log.error("[PNL_CORRUPT] botId={} entry={} exit={} — cannot compute PnL",
+                freshBot.getId(), freshBot.getEntryPrice(), result.getAvgPrice());
         }
 
         // Search by botId + OPEN status (more reliable than symbol match for multi-exchange)
