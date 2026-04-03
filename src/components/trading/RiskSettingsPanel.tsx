@@ -17,17 +17,21 @@ interface RiskParam {
 }
 
 const RISK_PARAMS: RiskParam[] = [
-  { key: "riskPercentPerTrade", label: "Risk per Trade", description: "Max % of balance risked per trade", default: 1, min: 0.1, max: 5, step: 0.1, suffix: "%" },
-  { key: "maxPositions", label: "Max Positions", description: "Max simultaneous open positions", default: 3, min: 1, max: 10, step: 1, suffix: "" },
+  { key: "riskPercentPerTrade", label: "Risk per Trade", description: "Max % of balance risked per trade (0.5% recommended)", default: 0.5, min: 0.1, max: 2, step: 0.1, suffix: "%" },
+  { key: "maxPositions", label: "Max Positions", description: "Max simultaneous open positions", default: 1, min: 1, max: 5, step: 1, suffix: "" },
+  { key: "maxPositionSize", label: "Max Position Size", description: "Max USDT per position", default: 500, min: 50, max: 5000, step: 50, suffix: " USDT" },
   { key: "maxDailyLossPercent", label: "Daily Loss Limit", description: "Auto-stop if daily loss exceeds", default: 3, min: 0.5, max: 10, step: 0.5, suffix: "%" },
+  { key: "maxTradesPerDay", label: "Max Trades/Day", description: "Max trades per day (prevents overtrading)", default: 10, min: 1, max: 30, step: 1, suffix: "" },
+  { key: "maxTradesPerHour", label: "Max Trades/Hour", description: "Max trades per rolling hour", default: 3, min: 1, max: 10, step: 1, suffix: "" },
   { key: "maxConsecutiveLosses", label: "Consecutive Loss Limit", description: "Auto-pause after N consecutive losses", default: 3, min: 1, max: 10, step: 1, suffix: "" },
-  { key: "minTradeScore", label: "Min Quality Score", description: "Reject trades scoring below", default: 70, min: 40, max: 90, step: 5, suffix: "/100" },
-  { key: "stopLossPercent", label: "Stop Loss", description: "Default SL % (ATR-based overrides this)", default: 1.5, min: 0.3, max: 5, step: 0.1, suffix: "%" },
-  { key: "takeProfitPercent", label: "Take Profit", description: "Default TP % (R:R-based overrides this)", default: 3, min: 0.5, max: 10, step: 0.5, suffix: "%" },
+  { key: "postLossCooldownSec", label: "Post-Loss Cooldown", description: "Seconds to wait after a losing trade", default: 300, min: 60, max: 900, step: 30, suffix: "s" },
+  { key: "minRiskReward", label: "Min Risk:Reward", description: "Minimum R:R ratio (2.0 = 1:2)", default: 2, min: 1.5, max: 5, step: 0.5, suffix: ":1" },
+  { key: "minSlDistancePercent", label: "Min SL Distance", description: "Reject SL tighter than this", default: 0.3, min: 0.1, max: 1, step: 0.05, suffix: "%" },
+  { key: "maxSlDistancePercent", label: "Max SL Distance", description: "Reject SL wider than this", default: 5, min: 1, max: 10, step: 0.5, suffix: "%" },
+  { key: "minTradeScore", label: "Min Quality Score", description: "Reject trades scoring below", default: 75, min: 50, max: 95, step: 5, suffix: "/100" },
   { key: "trailingStopPercent", label: "Trailing Stop", description: "Lock profits with trailing stop", default: 1.5, min: 0.3, max: 5, step: 0.1, suffix: "%" },
   { key: "maxSpreadPercent", label: "Max Spread", description: "Reject entry if spread exceeds", default: 0.2, min: 0.05, max: 1, step: 0.05, suffix: "%" },
   { key: "atrSlMultiplier", label: "ATR SL Multiplier", description: "SL distance in ATR multiples", default: 1.5, min: 0.5, max: 3, step: 0.1, suffix: "×" },
-  { key: "rrRatio", label: "Risk:Reward Ratio", description: "Minimum R:R for take profit", default: 2, min: 1, max: 5, step: 0.5, suffix: ":1" },
 ];
 
 export function RiskSettingsPanel({ bot }: { bot?: TradingBot }) {
