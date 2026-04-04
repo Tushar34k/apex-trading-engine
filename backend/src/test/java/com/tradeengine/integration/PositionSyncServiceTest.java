@@ -99,7 +99,7 @@ class PositionSyncServiceTest {
 
         when(botRepo.findByStatus("RUNNING")).thenReturn(List.of(bot));
         when(apiKeyRepo.findById(apiKeyId)).thenReturn(Optional.of(createApiKey()));
-        when(mockClient.getOpenPositions(any(), any(), any())).thenReturn(List.of()); // empty!
+        when(mockClient.getOpenPositions(any(), any(), any(), any())).thenReturn(List.of()); // empty!
 
         syncService.syncPositions();
 
