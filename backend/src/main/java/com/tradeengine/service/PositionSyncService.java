@@ -83,7 +83,7 @@ public class PositionSyncService {
         String baseUrl = client.resolveBaseUrl(representative.getExchangeMode());
 
         // Fetch all exchange positions in one call
-        List<ExchangePosition> exchangePositions = client.getOpenPositions(apiKey, secret, baseUrl);
+        List<ExchangePosition> exchangePositions = client.getOpenPositions(apiKey, secret, null, baseUrl);
 
         // Build lookup: exchange-native symbol → ExchangePosition
         Map<String, ExchangePosition> exchangeMap = new HashMap<>();
