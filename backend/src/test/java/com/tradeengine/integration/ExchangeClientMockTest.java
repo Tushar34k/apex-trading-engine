@@ -160,7 +160,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         BinanceClient client = new BinanceClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSDT", baseUrl);
 
         assertEquals(1, positions.size());
         ExchangePosition pos = positions.get(0);
