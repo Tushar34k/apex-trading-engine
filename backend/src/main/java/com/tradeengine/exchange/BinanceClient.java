@@ -266,15 +266,24 @@ public class BinanceClient implements ExchangeClient {
     }
 
     @Override
-    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String symbol, String baseUrl) {
         String base = resolveBase(baseUrl);
         String endpoint = "/fapi/v2/positionRisk";
 
         long timestamp = System.currentTimeMillis();
-        String params = buildQueryString(
-            "recvWindow", String.valueOf(recvWindow),
-            "timestamp", String.valueOf(timestamp)
-        );
+        String params;
+        if (symbol != null && !symbol.isBlank()) {
+            params = buildQueryString(
+                "symbol", symbol,
+                "recvWindow", String.valueOf(recvWindow),
+                "timestamp", String.valueOf(timestamp)
+            );
+        } else {
+            params = buildQueryString(
+                "recvWindow", String.valueOf(recvWindow),
+                "timestamp", String.valueOf(timestamp)
+            );
+        }
 
         String signed = appendSignature(params, secret);
         String url = base + endpoint + "?" + signed;

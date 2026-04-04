@@ -55,7 +55,7 @@ public interface ExchangeClient {
      *
      * @return list of open positions, never null
      */
-    List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl);
+    List<ExchangePosition> getOpenPositions(String apiKey, String secret, String symbol, String baseUrl);
 
     /**
      * Test connectivity and API key validity.

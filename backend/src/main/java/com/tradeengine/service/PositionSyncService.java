@@ -312,7 +312,7 @@ public class PositionSyncService {
                 ExchangeClient client = exchangeFactory.getClient(exchangeName);
                 String baseUrl = client.resolveBaseUrl(representative.getExchangeMode());
 
-                List<ExchangePosition> exchangePositions = client.getOpenPositions(apiKey, secret, baseUrl);
+                List<ExchangePosition> exchangePositions = client.getOpenPositions(apiKey, secret, null, baseUrl);
 
                 Map<String, ExchangePosition> exchangeMap = new HashMap<>();
                 for (ExchangePosition ep : exchangePositions) {

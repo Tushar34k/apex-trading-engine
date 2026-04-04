@@ -374,11 +374,14 @@ public class BybitClient implements ExchangeClient {
     }
 
     @Override
-    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String symbol, String baseUrl) {
         try {
             String base = resolveBase(baseUrl);
             String path = "/v5/position/list";
             String queryString = "category=linear&settleCoin=USDT";
+            if (symbol != null && !symbol.isBlank()) {
+                queryString += "&symbol=" + symbol;
+            }
             long timestamp = System.currentTimeMillis();
 
             String signature = sign(timestamp, apiKey, queryString, secret);
