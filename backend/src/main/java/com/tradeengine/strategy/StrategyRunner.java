@@ -739,8 +739,9 @@ public class StrategyRunner {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
-        String orderType = params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry"))
-            ? "LIMIT" : "MARKET";
+        // Save actual order type from execution result status, not just the request type
+        String orderType = result.getOrderType() != null ? result.getOrderType() :
+            (params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry")) ? "LIMIT" : "MARKET");
 
         TradeOrder order = new TradeOrder();
         order.setBotId(freshBot.getId());
