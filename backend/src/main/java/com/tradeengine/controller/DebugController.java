@@ -168,7 +168,7 @@ public class DebugController {
 
         // Step 7: Positions
         try {
-            var positions = client.getOpenPositions(decryptedKey, decryptedSecret, baseUrl);
+            var positions = client.getOpenPositions(decryptedKey, decryptedSecret, exchangeSymbol, baseUrl);
             report.put("positionCheck", Map.of(
                 "status", "OK",
                 "openPositions", positions.size()

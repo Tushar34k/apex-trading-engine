@@ -389,10 +389,13 @@ public class DeltaClient implements ExchangeClient {
     }
 
     @Override
-    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String baseUrl) {
+    public List<ExchangePosition> getOpenPositions(String apiKey, String secret, String symbol, String baseUrl) {
         try {
             String base = resolveBase(baseUrl);
             String path = "/v2/positions";
+            if (symbol != null && !symbol.isBlank()) {
+                path += "?underlying_asset_symbol=" + symbol;
+            }
             long timestamp = System.currentTimeMillis() / 1000;
 
             String signature = sign("GET" + timestamp + path, secret);

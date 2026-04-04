@@ -160,7 +160,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         BinanceClient client = new BinanceClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSDT", baseUrl);
 
         assertEquals(1, positions.size());
         ExchangePosition pos = positions.get(0);
@@ -218,7 +218,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         DeltaClient client = new DeltaClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSD", baseUrl);
 
         assertEquals(1, positions.size());
         assertEquals("BTCUSD", positions.get(0).getSymbol());
@@ -274,7 +274,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         BybitClient client = new BybitClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSDT", baseUrl);
 
         assertEquals(1, positions.size());
         assertEquals("BTCUSDT", positions.get(0).getSymbol());
