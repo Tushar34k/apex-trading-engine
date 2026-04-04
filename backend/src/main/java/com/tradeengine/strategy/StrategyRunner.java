@@ -405,35 +405,77 @@ public class StrategyRunner {
         BigDecimal currentPrice = BigDecimal.valueOf(signal.price());
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        // --- Risk-based position sizing (STRICT) ---
-        // SL is MANDATORY at this point (validated above), so always use risk-based sizing
-        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // default 0.5% — conservative
+        // ═══ STRICT RISK-BASED POSITION SIZING WITH CIRCUIT BREAKER ═══
+        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
         BigDecimal quantity;
 
         BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
         BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
 
-        if (slDistance.compareTo(BigDecimal.ZERO) > 0) {
-            BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
-
-            // Hard cap: never exceed 5% of balance in a single position
-            BigDecimal maxAllocation = usdtBalance.multiply(BigDecimal.valueOf(0.05)); // 5% hard cap
-            BigDecimal maxQty = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
-            quantity = riskBasedQty.min(maxQty);
-
-            log.info("[RISK_SIZING] botId={} balance={} risk={}% riskAmt={} slDist={} riskQty={} maxQty={} finalQty={}",
-                bot.getId(), usdtBalance.setScale(2, RoundingMode.HALF_UP), riskPercent,
-                riskAmount.setScale(2, RoundingMode.HALF_UP), slDistance, riskBasedQty, maxQty, quantity);
-        } else {
-            log.warn("Bot {}: SL distance is zero — should not reach here", bot.getId());
+        if (slDistance.compareTo(BigDecimal.ZERO) <= 0) {
+            log.error("[RISK_REJECTED] botId={} SL distance is zero — cannot size position", bot.getId());
             return;
         }
+
+        // Minimum SL distance sanity: reject if SL < 0.3% of price (too tight = huge position)
+        BigDecimal minSlDistance = currentPrice.multiply(BigDecimal.valueOf(0.003)); // 0.3%
+        if (slDistance.compareTo(minSlDistance) < 0) {
+            log.error("[SIZE_CAPPED] botId={} symbol={} SL distance {} < minimum {} (0.3%) — REJECTING to prevent oversized lot",
+                bot.getId(), exchangeSymbol, slDistance, minSlDistance);
+            notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                "SL too tight for safe sizing: " + slDistance + " < min " + minSlDistance);
+            return;
+        }
+
+        BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
+
+        // Hard cap 1: never exceed 5% of balance in notional value
+        BigDecimal maxAllocation = usdtBalance.multiply(BigDecimal.valueOf(0.05));
+        BigDecimal maxQty = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
+        quantity = riskBasedQty.min(maxQty);
+
+        // Hard cap 2: notional value sanity check — ABSOLUTE ceiling
+        BigDecimal notionalValue = quantity.multiply(currentPrice);
+        if (notionalValue.compareTo(maxAllocation) > 0) {
+            quantity = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
+            log.warn("[SIZE_CAPPED] botId={} notional {} exceeded 5% cap {} — clamped qty to {}",
+                bot.getId(), notionalValue.setScale(2, RoundingMode.HALF_UP),
+                maxAllocation.setScale(2, RoundingMode.HALF_UP), quantity);
+        }
+
+        // Hard cap 3: asset-specific sanity — reject absurdly large qty for high-value assets
+        // e.g. on a $500 account, 0.1 BTC at $100k = $10,000 = 20x the account
+        BigDecimal maxNotionalAbsolute = usdtBalance; // NEVER exceed 100% of balance in notional
+        if (quantity.multiply(currentPrice).compareTo(maxNotionalAbsolute) > 0) {
+            quantity = maxNotionalAbsolute.divide(currentPrice, 8, RoundingMode.DOWN);
+            log.error("[SIZE_CAPPED] botId={} symbol={} CRITICAL: qty would exceed entire balance — clamped to {}",
+                bot.getId(), exchangeSymbol, quantity);
+        }
+
+        log.info("[RISK_SIZING] botId={} balance={} risk={}% riskAmt={} slDist={} riskQty={} maxQty={} finalQty={} notional={}",
+            bot.getId(), usdtBalance.setScale(2, RoundingMode.HALF_UP), riskPercent,
+            riskAmount.setScale(4, RoundingMode.HALF_UP), slDistance.setScale(8, RoundingMode.HALF_UP),
+            riskBasedQty.setScale(8, RoundingMode.HALF_UP), maxQty.setScale(8, RoundingMode.HALF_UP),
+            quantity.setScale(8, RoundingMode.HALF_UP),
+            quantity.multiply(currentPrice).setScale(2, RoundingMode.HALF_UP));
 
         quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
-            log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE", bot.getId());
+            log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE — balance too small for this asset", bot.getId());
             return;
         }
+
+        // FINAL SANITY: log the leverage ratio for monitoring
+        BigDecimal finalNotional = quantity.multiply(currentPrice);
+        double impliedLeverage = finalNotional.doubleValue() / Math.max(1.0, usdtBalance.doubleValue());
+        if (impliedLeverage > 5.0) {
+            log.error("[SIZE_CAPPED] botId={} FATAL: implied leverage {}x > 5x — REJECTING trade",
+                bot.getId(), String.format("%.2f", impliedLeverage));
+            return;
+        }
+        log.info("[SIZE_CHECK] botId={} finalQty={} notional={} leverage={}x",
+            bot.getId(), quantity, finalNotional.setScale(2, RoundingMode.HALF_UP),
+            String.format("%.2f", impliedLeverage));
 
         if (symbolInfo != null) {
             String error = symbolInfo.validate(quantity, currentPrice);
@@ -697,8 +739,9 @@ public class StrategyRunner {
         // Reload bot from DB to avoid race condition with async callback
         TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
 
-        String orderType = params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry"))
-            ? "LIMIT" : "MARKET";
+        // Save actual order type from execution result status, not just the request type
+        String orderType = result.getOrderType() != null ? result.getOrderType() :
+            (params.containsKey("useLimitEntry") && Boolean.TRUE.equals(params.get("useLimitEntry")) ? "LIMIT" : "MARKET");
 
         TradeOrder order = new TradeOrder();
         order.setBotId(freshBot.getId());

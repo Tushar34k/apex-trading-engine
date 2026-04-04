@@ -381,6 +381,7 @@ public class TradeExecutionQueue {
                     .orderId(orderResult.getOrderId())
                     .executedQty(finalExecutedQty)
                     .avgPrice(orderResult.getAvgPrice())
+                    .orderType(orderResult.getOrderType())
                     .build();
 
             } catch (Exception e) {

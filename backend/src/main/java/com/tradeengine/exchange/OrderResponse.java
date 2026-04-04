@@ -17,6 +17,7 @@ public class OrderResponse {
     private String status;
     private BigDecimal executedQty;
     private BigDecimal avgPrice;
+    private String orderType; // MARKET or LIMIT — from exchange response
 
     /**
      * Whether the order was only partially filled.

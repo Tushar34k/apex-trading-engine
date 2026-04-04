@@ -98,6 +98,7 @@ public class TradeRequest {
         private final String orderId;
         private final BigDecimal executedQty;
         private final BigDecimal avgPrice;
+        private final String orderType; // MARKET or LIMIT from exchange
         private final String errorMessage;
     }
 }
