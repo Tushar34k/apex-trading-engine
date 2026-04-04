@@ -274,7 +274,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         BybitClient client = new BybitClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSDT", baseUrl);
 
         assertEquals(1, positions.size());
         assertEquals("BTCUSDT", positions.get(0).getSymbol());
