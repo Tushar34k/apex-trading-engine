@@ -218,7 +218,7 @@ class ExchangeClientMockTest {
             .addHeader("Content-Type", "application/json"));
 
         DeltaClient client = new DeltaClient();
-        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", baseUrl);
+        List<ExchangePosition> positions = client.getOpenPositions("key", "secret", "BTCUSD", baseUrl);
 
         assertEquals(1, positions.size());
         assertEquals("BTCUSD", positions.get(0).getSymbol());
