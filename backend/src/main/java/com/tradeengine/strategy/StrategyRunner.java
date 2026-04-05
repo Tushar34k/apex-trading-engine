@@ -422,6 +422,16 @@ public class StrategyRunner {
         if (slDistance.compareTo(minSlDistance) < 0) {
             log.error("[SIZE_CAPPED] botId={} symbol={} SL distance {} < minimum {} (0.3%) — REJECTING to prevent oversized lot",
                 bot.getId(), exchangeSymbol, slDistance, minSlDistance);
+            // Record rejection in sizing audit
+            Map<String, Object> rejectAudit = new LinkedHashMap<>();
+            rejectAudit.put("timestamp", Instant.now().toString());
+            rejectAudit.put("botId", bot.getId().toString());
+            rejectAudit.put("symbol", exchangeSymbol);
+            rejectAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+            rejectAudit.put("slDistancePercent", slDistance.divide(currentPrice, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).doubleValue());
+            rejectAudit.put("status", "REJECTED");
+            rejectAudit.put("reason", "SL too tight: " + slDistance + " < min " + minSlDistance);
+            com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(rejectAudit);
             notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
                 "SL too tight for safe sizing: " + slDistance + " < min " + minSlDistance);
             return;
