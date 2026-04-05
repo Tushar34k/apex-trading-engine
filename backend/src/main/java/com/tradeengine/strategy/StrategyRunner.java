@@ -422,6 +422,16 @@ public class StrategyRunner {
         if (slDistance.compareTo(minSlDistance) < 0) {
             log.error("[SIZE_CAPPED] botId={} symbol={} SL distance {} < minimum {} (0.3%) — REJECTING to prevent oversized lot",
                 bot.getId(), exchangeSymbol, slDistance, minSlDistance);
+            // Record rejection in sizing audit
+            Map<String, Object> rejectAudit = new LinkedHashMap<>();
+            rejectAudit.put("timestamp", Instant.now().toString());
+            rejectAudit.put("botId", bot.getId().toString());
+            rejectAudit.put("symbol", exchangeSymbol);
+            rejectAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+            rejectAudit.put("slDistancePercent", slDistance.divide(currentPrice, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).doubleValue());
+            rejectAudit.put("status", "REJECTED");
+            rejectAudit.put("reason", "SL too tight: " + slDistance + " < min " + minSlDistance);
+            com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(rejectAudit);
             notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
                 "SL too tight for safe sizing: " + slDistance + " < min " + minSlDistance);
             return;
@@ -459,6 +469,23 @@ public class StrategyRunner {
             quantity.setScale(8, RoundingMode.HALF_UP),
             quantity.multiply(currentPrice).setScale(2, RoundingMode.HALF_UP));
 
+        // ═══ SIZING AUDIT TRAIL — record every evaluation for frontend monitor ═══
+        boolean wasCapped = riskBasedQty.compareTo(quantity) > 0;
+        Map<String, Object> sizingAudit = new LinkedHashMap<>();
+        sizingAudit.put("timestamp", Instant.now().toString());
+        sizingAudit.put("botId", bot.getId().toString());
+        sizingAudit.put("symbol", exchangeSymbol);
+        sizingAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("riskPercent", riskPercent);
+        sizingAudit.put("slDistancePercent", slDistance.divide(currentPrice, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).doubleValue());
+        sizingAudit.put("rawRiskQty", riskBasedQty.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("maxCapQty", maxQty.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("finalQty", quantity.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("notionalValue", quantity.multiply(currentPrice).setScale(2, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("impliedLeverage", quantity.multiply(currentPrice).doubleValue() / Math.max(1.0, usdtBalance.doubleValue()));
+        sizingAudit.put("status", wasCapped ? "SIZE_CAPPED" : "PASSED");
+        com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(sizingAudit);
+
         quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE — balance too small for this asset", bot.getId());
@@ -471,6 +498,16 @@ public class StrategyRunner {
         if (impliedLeverage > 5.0) {
             log.error("[SIZE_CAPPED] botId={} FATAL: implied leverage {}x > 5x — REJECTING trade",
                 bot.getId(), String.format("%.2f", impliedLeverage));
+            // Record leverage rejection
+            Map<String, Object> levAudit = new LinkedHashMap<>();
+            levAudit.put("timestamp", Instant.now().toString());
+            levAudit.put("botId", bot.getId().toString());
+            levAudit.put("symbol", exchangeSymbol);
+            levAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+            levAudit.put("impliedLeverage", impliedLeverage);
+            levAudit.put("status", "REJECTED");
+            levAudit.put("reason", "Implied leverage " + String.format("%.2f", impliedLeverage) + "x > 5x limit");
+            com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(levAudit);
             return;
         }
         log.info("[SIZE_CHECK] botId={} finalQty={} notional={} leverage={}x",

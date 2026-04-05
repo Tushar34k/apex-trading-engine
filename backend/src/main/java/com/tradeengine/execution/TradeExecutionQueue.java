@@ -429,6 +429,28 @@ public class TradeExecutionQueue {
      */
     private boolean isRetryableError(Exception e) {
         String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+
+        // ═══ GRACEFUL 401 HANDLING — don't crash, alert the frontend ═══
+        if (msg.contains("401") || msg.contains("invalid api-key") || msg.contains("ip") || msg.contains("permission")) {
+            log.error("[API_AUTH_ERROR] Exchange returned 401/auth error: {}", e.getMessage());
+            // Extract exchange name from context if possible
+            String exchange = "UNKNOWN";
+            if (msg.contains("binance")) exchange = "BINANCE";
+            else if (msg.contains("delta")) exchange = "DELTA";
+            else if (msg.contains("bybit")) exchange = "BYBIT";
+            com.tradeengine.controller.RiskMonitorController.recordApiAuthError(exchange, e.getMessage());
+
+            // Record as sizing audit rejection too
+            Map<String, Object> authAudit = new java.util.LinkedHashMap<>();
+            authAudit.put("timestamp", java.time.Instant.now().toString());
+            authAudit.put("symbol", "N/A");
+            authAudit.put("status", "REJECTED");
+            authAudit.put("reason", "API_AUTH_BLOCKED: " + e.getMessage());
+            com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(authAudit);
+
+            return false; // NOT retryable — auth errors won't resolve on retry
+        }
+
         return msg.contains("429") || msg.contains("500") || msg.contains("502")
             || msg.contains("503") || msg.contains("timeout") || msg.contains("timed out")
             || e instanceof java.net.http.HttpTimeoutException;
