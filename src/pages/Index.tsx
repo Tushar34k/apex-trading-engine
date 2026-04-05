@@ -171,8 +171,9 @@ const Dashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2">
+        <div className="xl:col-span-2 space-y-6">
           <TradingChart />
+          <RiskSizingMonitor />
         </div>
         <div className="space-y-6">
           <ActiveBots />

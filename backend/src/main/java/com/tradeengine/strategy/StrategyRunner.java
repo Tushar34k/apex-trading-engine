@@ -498,6 +498,16 @@ public class StrategyRunner {
         if (impliedLeverage > 5.0) {
             log.error("[SIZE_CAPPED] botId={} FATAL: implied leverage {}x > 5x — REJECTING trade",
                 bot.getId(), String.format("%.2f", impliedLeverage));
+            // Record leverage rejection
+            Map<String, Object> levAudit = new LinkedHashMap<>();
+            levAudit.put("timestamp", Instant.now().toString());
+            levAudit.put("botId", bot.getId().toString());
+            levAudit.put("symbol", exchangeSymbol);
+            levAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+            levAudit.put("impliedLeverage", impliedLeverage);
+            levAudit.put("status", "REJECTED");
+            levAudit.put("reason", "Implied leverage " + String.format("%.2f", impliedLeverage) + "x > 5x limit");
+            com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(levAudit);
             return;
         }
         log.info("[SIZE_CHECK] botId={} finalQty={} notional={} leverage={}x",
