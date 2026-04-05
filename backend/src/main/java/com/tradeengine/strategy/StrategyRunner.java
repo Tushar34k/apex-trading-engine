@@ -459,6 +459,23 @@ public class StrategyRunner {
             quantity.setScale(8, RoundingMode.HALF_UP),
             quantity.multiply(currentPrice).setScale(2, RoundingMode.HALF_UP));
 
+        // ═══ SIZING AUDIT TRAIL — record every evaluation for frontend monitor ═══
+        boolean wasCapped = riskBasedQty.compareTo(quantity) > 0;
+        Map<String, Object> sizingAudit = new LinkedHashMap<>();
+        sizingAudit.put("timestamp", Instant.now().toString());
+        sizingAudit.put("botId", bot.getId().toString());
+        sizingAudit.put("symbol", exchangeSymbol);
+        sizingAudit.put("balance", usdtBalance.setScale(2, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("riskPercent", riskPercent);
+        sizingAudit.put("slDistancePercent", slDistance.divide(currentPrice, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).doubleValue());
+        sizingAudit.put("rawRiskQty", riskBasedQty.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("maxCapQty", maxQty.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("finalQty", quantity.setScale(8, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("notionalValue", quantity.multiply(currentPrice).setScale(2, RoundingMode.HALF_UP).doubleValue());
+        sizingAudit.put("impliedLeverage", quantity.multiply(currentPrice).doubleValue() / Math.max(1.0, usdtBalance.doubleValue()));
+        sizingAudit.put("status", wasCapped ? "SIZE_CAPPED" : "PASSED");
+        com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(sizingAudit);
+
         quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE — balance too small for this asset", bot.getId());
