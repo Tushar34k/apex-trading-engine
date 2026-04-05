@@ -9,6 +9,7 @@ import { CreateBotDialog } from "@/components/trading/CreateBotDialog";
 import { NotificationPanel } from "@/components/trading/NotificationPanel";
 import { TradeQualityPanel } from "@/components/trading/TradeQualityPanel";
 import { AIValidationPanel } from "@/components/trading/AIValidationPanel";
+import { RiskSizingMonitor } from "@/components/trading/RiskSizingMonitor";
 import { useBots } from "@/hooks/api/useBots";
 import { useAccountBalance } from "@/hooks/api/useAccountBalance";
 import { system } from "@/lib/api";
