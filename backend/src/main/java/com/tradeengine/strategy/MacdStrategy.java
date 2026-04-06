@@ -4,11 +4,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * MACD Strategy.
+ * MACD Strategy with ATR-based SL/TP.
  * BUY when MACD line crosses above signal line.
  * SELL when MACD line crosses below signal line.
- * 
- * Params: macdFast (12), macdSlow (26), macdSignal (9)
  */
 public class MacdStrategy implements TradingStrategy {
 
@@ -27,9 +25,7 @@ public class MacdStrategy implements TradingStrategy {
 
         double[] prices = closingPrices.stream().mapToDouble(d -> d).toArray();
 
-        // Current MACD
         double[] macdCurrent = calculateMACD(prices, fastPeriod, slowPeriod, signalPeriod, prices.length - 1);
-        // Previous MACD
         double[] macdPrev = calculateMACD(prices, fastPeriod, slowPeriod, signalPeriod, prices.length - 2);
 
         double macdLine = macdCurrent[0];
@@ -42,14 +38,20 @@ public class MacdStrategy implements TradingStrategy {
         boolean currentAbove = macdLine > signalLine;
         boolean prevAbove = prevMacdLine > prevSignalLine;
 
-        // BUY: MACD crosses above signal line
         if (!hasOpenPosition && currentAbove && !prevAbove) {
+            double atr = StrategyUtils.calculateATR(allCandles, getInt(params, "atrPeriod", 14));
+            double slMultiplier = getDouble(params, "slAtrMultiplier", 1.5);
+            double rrRatio = getDouble(params, "rrRatio", 2.5);
+
+            double stopLoss = price - (atr * slMultiplier);
+            double takeProfit = price + (atr * slMultiplier * rrRatio);
+
             return new SignalResult(Signal.BUY, price,
-                String.format("MACD(%.4f) crossed above Signal(%.4f), histogram=%.4f → BUY",
-                    macdLine, signalLine, histogram));
+                String.format("MACD(%.4f) crossed above Signal(%.4f), hist=%.4f | SL=%.2f TP=%.2f ATR=%.2f",
+                    macdLine, signalLine, histogram, stopLoss, takeProfit, atr),
+                stopLoss, takeProfit, null);
         }
 
-        // SELL: MACD crosses below signal line
         if (hasOpenPosition && !currentAbove && prevAbove) {
             return new SignalResult(Signal.SELL, price,
                 String.format("MACD(%.4f) crossed below Signal(%.4f), histogram=%.4f → SELL",
@@ -61,17 +63,12 @@ public class MacdStrategy implements TradingStrategy {
                 macdLine, signalLine, histogram));
     }
 
-    /**
-     * Returns [macdLine, signalLine, histogram]
-     */
     private double[] calculateMACD(double[] prices, int fast, int slow, int signal, int endIndex) {
         double fastEma = EmaCrossover.calculateEMA(prices, fast, endIndex);
         double slowEma = EmaCrossover.calculateEMA(prices, slow, endIndex);
         double macdLine = fastEma - slowEma;
 
-        // Calculate signal line (EMA of MACD values)
-        // We need a series of MACD values to compute the signal EMA
-        int seriesLen = signal + 5; // extra buffer
+        int seriesLen = signal + 5;
         double[] macdSeries = new double[seriesLen];
         for (int i = 0; i < seriesLen; i++) {
             int idx = endIndex - (seriesLen - 1 - i);
@@ -81,7 +78,6 @@ public class MacdStrategy implements TradingStrategy {
             macdSeries[i] = f - s;
         }
 
-        // Signal = EMA of macdSeries
         double multiplier = 2.0 / (signal + 1);
         double signalEma = macdSeries[0];
         for (int i = 1; i < macdSeries.length; i++) {
@@ -99,6 +95,13 @@ public class MacdStrategy implements TradingStrategy {
         Object v = params == null ? null : params.get(key);
         if (v instanceof Number) return ((Number) v).intValue();
         if (v != null) try { return Integer.parseInt(v.toString()); } catch (Exception ignored) {}
+        return def;
+    }
+
+    private double getDouble(Map<String, Object> params, String key, double def) {
+        Object v = params == null ? null : params.get(key);
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        if (v != null) try { return Double.parseDouble(v.toString()); } catch (Exception ignored) {}
         return def;
     }
 }

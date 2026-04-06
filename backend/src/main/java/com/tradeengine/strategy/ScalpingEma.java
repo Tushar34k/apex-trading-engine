@@ -4,10 +4,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Scalping EMA Strategy.
+ * Scalping EMA Strategy with ATR-based SL/TP.
  * Uses fast EMAs (default EMA5/EMA13) for quick entries on small timeframes.
- * BUY when fastEMA crosses above slowEMA.
- * SELL when fastEMA crosses below slowEMA.
  */
 public class ScalpingEma implements TradingStrategy {
 
@@ -19,8 +17,7 @@ public class ScalpingEma implements TradingStrategy {
 
         int minCandles = slowPeriod + 2;
         if (closingPrices.size() < minCandles) {
-            return new SignalResult(Signal.HOLD, lastPrice(closingPrices),
-                "Insufficient data for ScalpingEMA");
+            return new SignalResult(Signal.HOLD, lastPrice(closingPrices), "Insufficient data for ScalpingEMA");
         }
 
         double[] prices = closingPrices.stream().mapToDouble(d -> d).toArray();
@@ -34,11 +31,19 @@ public class ScalpingEma implements TradingStrategy {
         boolean currentAbove = currentFast > currentSlow;
         boolean previousAbove = prevFast > prevSlow;
 
-        // Additional momentum filter: price must be above fast EMA for buy
         if (!hasOpenPosition && currentAbove && !previousAbove && price > currentFast) {
+            // Scalping uses tighter SL (1.0x ATR) but same R:R
+            double atr = StrategyUtils.calculateATR(allCandles, getInt(params, "atrPeriod", 14));
+            double slMultiplier = getDouble(params, "slAtrMultiplier", 1.0); // tighter for scalping
+            double rrRatio = getDouble(params, "rrRatio", 2.0);
+
+            double stopLoss = price - (atr * slMultiplier);
+            double takeProfit = price + (atr * slMultiplier * rrRatio);
+
             return new SignalResult(Signal.BUY, price,
-                String.format("ScalpEMA(%d)=%.2f crossed above EMA(%d)=%.2f, price above fast",
-                    fastPeriod, currentFast, slowPeriod, currentSlow));
+                String.format("ScalpEMA(%d)=%.2f crossed above EMA(%d)=%.2f | SL=%.2f TP=%.2f ATR=%.2f",
+                    fastPeriod, currentFast, slowPeriod, currentSlow, stopLoss, takeProfit, atr),
+                stopLoss, takeProfit, null);
         } else if (hasOpenPosition && !currentAbove && previousAbove) {
             return new SignalResult(Signal.SELL, price,
                 String.format("ScalpEMA(%d)=%.2f crossed below EMA(%d)=%.2f",
@@ -59,5 +64,12 @@ public class ScalpingEma implements TradingStrategy {
         Object v = params.get(key);
         if (v instanceof Number) return ((Number) v).intValue();
         try { return Integer.parseInt(v.toString()); } catch (Exception e) { return defaultVal; }
+    }
+
+    private double getDouble(Map<String, Object> params, String key, double defaultVal) {
+        if (params == null || !params.containsKey(key)) return defaultVal;
+        Object v = params.get(key);
+        if (v instanceof Number) return ((Number) v).doubleValue();
+        try { return Double.parseDouble(v.toString()); } catch (Exception e) { return defaultVal; }
     }
 }
