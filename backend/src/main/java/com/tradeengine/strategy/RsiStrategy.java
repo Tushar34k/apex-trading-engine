@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * RSI Strategy.
+ * RSI Strategy with ATR-based SL/TP.
  * BUY when RSI drops below buyThreshold (oversold).
  * SELL when RSI rises above sellThreshold (overbought).
  */
@@ -26,45 +26,49 @@ public class RsiStrategy implements TradingStrategy {
         double prevRsi = calculateRSI(closingPrices.subList(0, closingPrices.size() - 1), period);
         double price = lastPrice(closingPrices);
 
-        // BUY: RSI crosses up through buyThreshold (was below, now above or at)
+        // BUY conditions
+        boolean buySignal = false;
+        String buyReason = null;
+
         if (!hasOpenPosition && prevRsi < buyThreshold && rsi >= buyThreshold) {
-            return new SignalResult(Signal.BUY, price,
-                String.format("RSI(%d)=%.1f crossed above oversold level %.0f (prev=%.1f) → BUY signal",
-                    period, rsi, buyThreshold, prevRsi));
+            buySignal = true;
+            buyReason = String.format("RSI(%d)=%.1f crossed above oversold %.0f (prev=%.1f)", period, rsi, buyThreshold, prevRsi);
+        } else if (!hasOpenPosition && rsi < buyThreshold - 5) {
+            buySignal = true;
+            buyReason = String.format("RSI(%d)=%.1f deeply oversold (threshold=%.0f)", period, rsi, buyThreshold);
         }
 
-        // Also BUY if RSI is deeply oversold
-        if (!hasOpenPosition && rsi < buyThreshold - 5) {
+        if (buySignal) {
+            double atr = StrategyUtils.calculateATR(allCandles, getInt(params, "atrPeriod", 14));
+            double slMultiplier = getDouble(params, "slAtrMultiplier", 1.5);
+            double rrRatio = getDouble(params, "rrRatio", 2.5);
+
+            double stopLoss = price - (atr * slMultiplier);
+            double takeProfit = price + (atr * slMultiplier * rrRatio);
+
             return new SignalResult(Signal.BUY, price,
-                String.format("RSI(%d)=%.1f deeply oversold (threshold=%.0f) → BUY signal",
-                    period, rsi, buyThreshold));
+                buyReason + String.format(" | SL=%.2f TP=%.2f ATR=%.2f", stopLoss, takeProfit, atr),
+                stopLoss, takeProfit, null);
         }
 
-        // SELL: RSI crosses down through sellThreshold
+        // SELL conditions
         if (hasOpenPosition && prevRsi > sellThreshold && rsi <= sellThreshold) {
             return new SignalResult(Signal.SELL, price,
-                String.format("RSI(%d)=%.1f crossed below overbought level %.0f (prev=%.1f) → SELL signal",
-                    period, rsi, sellThreshold, prevRsi));
+                String.format("RSI(%d)=%.1f crossed below overbought %.0f (prev=%.1f)", period, rsi, sellThreshold, prevRsi));
         }
-
-        // Also SELL if RSI is extremely overbought
         if (hasOpenPosition && rsi > sellThreshold + 5) {
             return new SignalResult(Signal.SELL, price,
-                String.format("RSI(%d)=%.1f extremely overbought (threshold=%.0f) → SELL signal",
-                    period, rsi, sellThreshold));
+                String.format("RSI(%d)=%.1f extremely overbought (threshold=%.0f)", period, rsi, sellThreshold));
         }
 
         return new SignalResult(Signal.HOLD, price,
-            String.format("RSI(%d)=%.1f — no signal (buy<%.0f, sell>%.0f)",
-                period, rsi, buyThreshold, sellThreshold));
+            String.format("RSI(%d)=%.1f — no signal (buy<%.0f, sell>%.0f)", period, rsi, buyThreshold, sellThreshold));
     }
 
     public static double calculateRSI(List<Double> prices, int period) {
-        if (prices.size() < period + 1) return 50; // neutral default
+        if (prices.size() < period + 1) return 50;
 
         double gainSum = 0, lossSum = 0;
-
-        // Initial average gain/loss
         for (int i = prices.size() - period; i < prices.size(); i++) {
             double change = prices.get(i) - prices.get(i - 1);
             if (change > 0) gainSum += change;
@@ -73,7 +77,6 @@ public class RsiStrategy implements TradingStrategy {
 
         double avgGain = gainSum / period;
         double avgLoss = lossSum / period;
-
         if (avgLoss == 0) return 100;
         double rs = avgGain / avgLoss;
         return 100 - (100 / (1 + rs));

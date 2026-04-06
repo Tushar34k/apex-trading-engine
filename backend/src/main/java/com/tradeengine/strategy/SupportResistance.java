@@ -5,7 +5,7 @@ import java.util.*;
 /**
  * Support/Resistance Strategy.
  * Detects S/R levels from recent swing highs/lows.
- * BUY when price bounces off support.
+ * BUY when price bounces off support with ATR-based SL below support and TP at resistance.
  * SELL when price rejects resistance.
  */
 public class SupportResistance implements TradingStrategy {
@@ -21,9 +21,8 @@ public class SupportResistance implements TradingStrategy {
                 "Insufficient data for S/R (" + allCandles.size() + "/" + lookback + ")");
         }
 
-        // Use last 'lookback' candles
         List<double[]> recent = allCandles.subList(allCandles.size() - lookback, allCandles.size());
-        double currentPrice = recent.get(recent.size() - 1)[4]; // close
+        double currentPrice = recent.get(recent.size() - 1)[4];
 
         // Find swing lows (support) and swing highs (resistance)
         List<Double> supports = new ArrayList<>();
@@ -33,12 +32,10 @@ public class SupportResistance implements TradingStrategy {
             double high = recent.get(i)[2];
             double low = recent.get(i)[3];
 
-            // Swing high
             if (high > recent.get(i - 1)[2] && high > recent.get(i - 2)[2]
                 && high > recent.get(i + 1)[2] && high > recent.get(i + 2)[2]) {
                 resistances.add(high);
             }
-            // Swing low
             if (low < recent.get(i - 1)[3] && low < recent.get(i - 2)[3]
                 && low < recent.get(i + 1)[3] && low < recent.get(i + 2)[3]) {
                 supports.add(low);
@@ -49,7 +46,6 @@ public class SupportResistance implements TradingStrategy {
             return new SignalResult(Signal.HOLD, currentPrice, "No S/R levels detected");
         }
 
-        // Find nearest support and resistance
         Double nearestSupport = supports.stream()
             .filter(s -> s < currentPrice)
             .max(Comparator.naturalOrder()).orElse(null);
@@ -62,9 +58,27 @@ public class SupportResistance implements TradingStrategy {
         if (!hasOpenPosition && nearestSupport != null) {
             double distPct = (currentPrice - nearestSupport) / nearestSupport;
             if (distPct >= 0 && distPct <= tolerance) {
+                // SL: below support by 1.5x ATR; TP: at resistance or 2.5x risk
+                double atr = StrategyUtils.calculateATR(allCandles, getInt(params, "atrPeriod", 14));
+                double slMultiplier = getDouble(params, "slAtrMultiplier", 1.5);
+                double rrRatio = getDouble(params, "rrRatio", 2.5);
+
+                double stopLoss = nearestSupport - (atr * slMultiplier);
+                double risk = currentPrice - stopLoss;
+                double takeProfit = nearestResistance != null
+                    ? nearestResistance
+                    : currentPrice + (risk * rrRatio);
+
+                // Ensure minimum R:R of 2.0
+                double actualRR = risk > 0 ? (takeProfit - currentPrice) / risk : 0;
+                if (actualRR < 2.0) {
+                    takeProfit = currentPrice + (risk * rrRatio);
+                }
+
                 return new SignalResult(Signal.BUY, currentPrice,
-                    String.format("Price %.2f bouncing from support %.2f (%.2f%%)",
-                        currentPrice, nearestSupport, distPct * 100));
+                    String.format("Price %.2f bouncing from support %.2f (%.2f%%) | SL=%.2f TP=%.2f ATR=%.2f",
+                        currentPrice, nearestSupport, distPct * 100, stopLoss, takeProfit, atr),
+                    stopLoss, takeProfit, null);
             }
         }
 

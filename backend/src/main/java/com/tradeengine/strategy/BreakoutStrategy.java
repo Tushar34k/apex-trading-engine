@@ -4,11 +4,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Breakout Strategy.
+ * Breakout Strategy with structure-based SL/TP.
  * BUY when price breaks above the highest high of lookback period.
- * SELL when price breaks below the lowest low of lookback period.
- * 
- * Params: breakoutLookback (20), breakoutConfirm (1.002 = 0.2% above/below)
+ * SL placed below the breakout candle's low. TP at 2.5x risk.
  */
 public class BreakoutStrategy implements TradingStrategy {
 
@@ -16,14 +14,13 @@ public class BreakoutStrategy implements TradingStrategy {
     public SignalResult evaluate(List<Double> closingPrices, List<double[]> allCandles,
                                  Map<String, Object> params, boolean hasOpenPosition) {
         int lookback = getInt(params, "breakoutLookback", 20);
-        double confirmFactor = getDouble(params, "breakoutConfirm", 0.2); // percent above/below
+        double confirmFactor = getDouble(params, "breakoutConfirm", 0.2);
 
         if (allCandles.size() < lookback + 2) {
             return new SignalResult(Signal.HOLD, lastPrice(closingPrices),
                 "Insufficient data for Breakout (need " + (lookback + 2) + ", got " + allCandles.size() + ")");
         }
 
-        // Look at candles BEFORE the current one
         int end = allCandles.size() - 1;
         int start = end - lookback;
 
@@ -38,21 +35,31 @@ public class BreakoutStrategy implements TradingStrategy {
         }
 
         double currentClose = allCandles.get(end)[4];
-        double currentHigh = allCandles.get(end)[2];
+        double currentLow = allCandles.get(end)[3];
         double breakoutThreshold = highestHigh * (1 + confirmFactor / 100);
         double breakdownThreshold = lowestLow * (1 - confirmFactor / 100);
 
-        // BUY: price breaks above resistance with confirmation
         if (!hasOpenPosition && currentClose > breakoutThreshold) {
+            // SL below the breakout candle's low or ATR-based, whichever is wider
+            double atr = StrategyUtils.calculateATR(allCandles, getInt(params, "atrPeriod", 14));
+            double slMultiplier = getDouble(params, "slAtrMultiplier", 1.5);
+            double rrRatio = getDouble(params, "rrRatio", 2.5);
+
+            double atrSl = currentClose - (atr * slMultiplier);
+            double structureSl = currentLow - (atr * 0.2); // just below breakout candle low
+            double stopLoss = Math.min(atrSl, structureSl); // more conservative (wider) SL
+            double risk = currentClose - stopLoss;
+            double takeProfit = currentClose + (risk * rrRatio);
+
             return new SignalResult(Signal.BUY, currentClose,
-                String.format("Breakout UP: price %.2f > resistance %.2f (+%.1f%% confirm) → BUY",
-                    currentClose, highestHigh, confirmFactor));
+                String.format("Breakout UP: price %.2f > resistance %.2f (+%.1f%%) | SL=%.2f TP=%.2f ATR=%.2f",
+                    currentClose, highestHigh, confirmFactor, stopLoss, takeProfit, atr),
+                stopLoss, takeProfit, null);
         }
 
-        // SELL: price breaks below support with confirmation
         if (hasOpenPosition && currentClose < breakdownThreshold) {
             return new SignalResult(Signal.SELL, currentClose,
-                String.format("Breakdown: price %.2f < support %.2f (-%.1f%% confirm) → SELL",
+                String.format("Breakdown: price %.2f < support %.2f (-%.1f%%) → SELL",
                     currentClose, lowestLow, confirmFactor));
         }
 
