@@ -600,8 +600,11 @@ public class StrategyRunner {
                             String notificationType, String exchangeName, String exchangeSymbol) {
         if (bot.getQuantity() == null || bot.getQuantity().compareTo(BigDecimal.ZERO) <= 0) return;
 
-        if (killSwitch.isActive() && "BOT_SELL".equals(notificationType)) {
-            log.warn("Bot {} SELL blocked — kill switch active", bot.getId());
+        // CRITICAL: Protective exits (SL, TP, trailing SL, slippage) must ALWAYS execute even during kill switch.
+        // Only block voluntary strategy-driven sells.
+        boolean isProtectiveExit = !"BOT_SELL".equals(notificationType);
+        if (killSwitch.isActive() && !isProtectiveExit) {
+            log.warn("Bot {} voluntary SELL blocked — kill switch active", bot.getId());
             return;
         }
 
