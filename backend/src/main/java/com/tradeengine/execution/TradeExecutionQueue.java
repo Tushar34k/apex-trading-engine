@@ -373,8 +373,11 @@ public class TradeExecutionQueue {
                 // Always use executedQty from exchange — never assume full fill
                 BigDecimal finalExecutedQty = orderResult.getExecutedQty();
                 if (finalExecutedQty == null || finalExecutedQty.compareTo(java.math.BigDecimal.ZERO) <= 0) {
-                    finalExecutedQty = req.getQuantity(); // fallback only if exchange didn't report
-                    log.warn("[PARTIAL_FILL] executedQty missing from response, using requested qty={}", finalExecutedQty);
+                    log.error("[FILL_REJECTED] executedQty missing/zero from exchange — rejecting to prevent PnL corruption. Requested qty was {}", req.getQuantity());
+                    return TradeRequest.TradeResult.builder()
+                        .success(false)
+                        .errorMessage("Exchange returned zero/null executedQty — fill rejected for safety")
+                        .build();
                 }
 
                 return TradeRequest.TradeResult.builder()
