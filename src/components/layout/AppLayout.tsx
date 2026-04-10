@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
 import { useTradeEvents } from "@/hooks/useTradeEvents";
+import { KillSwitchModal } from "@/components/trading/KillSwitchModal";
 
 export function AppLayout() {
   useTradeEvents(); // Live WS → React Query cache invalidation
@@ -15,6 +16,7 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+      <KillSwitchModal />
     </div>
   );
 }

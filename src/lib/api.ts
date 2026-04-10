@@ -219,6 +219,10 @@ export const system = {
     client.post('/system/kill-switch/activate', { reason }).then((r) => r.data),
   resetKillSwitch: () =>
     client.post('/system/kill-switch/reset').then((r) => r.data),
+  syncBalances: () =>
+    client.post('/exchange/sync-balances').then((r) => r.data),
+  reconcilePositions: () =>
+    client.post('/trading/reconcile').then((r) => r.data),
 };
 
 export const aiValidation = {
