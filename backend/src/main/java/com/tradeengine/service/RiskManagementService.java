@@ -152,8 +152,13 @@ public class RiskManagementService {
         // Min SL distance (default 0.3% — prevents getting stopped out by noise)
         double minSlPercent = getDouble(params, "minSlDistancePercent", 0.3);
         if (slPercent < minSlPercent) {
-            log.warn("Bot {} RISK: SL too tight: {}% < min {}%", bot.getId(), String.format("%.2f", slPercent), minSlPercent);
-            return new RiskCheck(false, "SL too tight: " + String.format("%.2f", slPercent) + "% (min " + minSlPercent + "%)");
+            double userSlInput = getDouble(params, "__userSlPercent", -1);
+            double atrSlInput = getDouble(params, "__atrSlPercent", -1);
+            String diagnostic = String.format(
+                "SL too tight: %.2f%% (min %.1f%%) | userInput=%.2f%% atrCalc=%.2f%% entry=%.2f slPrice=%.2f",
+                slPercent, minSlPercent, userSlInput, atrSlInput, entryPrice, stopLoss);
+            log.warn("Bot {} RISK: {}", bot.getId(), diagnostic);
+            return new RiskCheck(false, diagnostic);
         }
 
         // Max SL distance (default 5% — prevents oversized losses)

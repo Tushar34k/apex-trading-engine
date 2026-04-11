@@ -315,11 +315,27 @@ public class StrategyRunner {
                     bot.getId(), String.format("%.3f", aiResult.confidence()), aiResult.latencyMs());
                 params.put("__aiConfidence", aiResult.confidence());
 
-                // Inject SL/TP from strategy signal
-                double slPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
-                params.put("stopLossPercent", slPercent);
+                // Inject SL/TP from strategy signal — but respect user's stopLossPercent as a FLOOR
+                double atrSlPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
+                double userSlPercent = params.containsKey("stopLossPercent")
+                    ? ((Number) params.get("stopLossPercent")).doubleValue() : 0.0;
+                double finalSlPercent = Math.max(atrSlPercent, userSlPercent);
+
+                if (finalSlPercent != atrSlPercent) {
+                    log.info("[SL_FLOOR] botId={} ATR-SL={}% overridden by user-SL={}% → final={}%",
+                        bot.getId(), String.format("%.2f", atrSlPercent), String.format("%.2f", userSlPercent), String.format("%.2f", finalSlPercent));
+                }
+                params.put("stopLossPercent", finalSlPercent);
+                params.put("__atrSlPercent", atrSlPercent);
+                params.put("__userSlPercent", userSlPercent);
+
                 if (signal.takeProfit() != null) {
                     double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
+                    // Scale TP proportionally if SL was widened by user floor
+                    if (finalSlPercent > atrSlPercent && atrSlPercent > 0) {
+                        double scaleFactor = finalSlPercent / atrSlPercent;
+                        tpPercent = tpPercent * scaleFactor;
+                    }
                     params.put("takeProfitPercent", tpPercent);
                 }
                 // Store TP1 (1:1 R:R) for partial profit booking
