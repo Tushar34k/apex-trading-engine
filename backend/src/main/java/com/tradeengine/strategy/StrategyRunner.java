@@ -269,9 +269,27 @@ public class StrategyRunner {
                     return;
                 }
 
+                RiskSignalAdjuster.AdjustedRiskSignal adjustedRisk =
+                    RiskSignalAdjuster.forLongEntry(signal.price(), signal.stopLoss(), signal.takeProfit(), params);
+
+                params.put("stopLossPercent", adjustedRisk.finalSlPercent());
+                params.put("__atrSlPercent", adjustedRisk.atrSlPercent());
+                params.put("__userSlPercent", adjustedRisk.userSlPercent());
+                if (adjustedRisk.takeProfitPercent() != null) {
+                    params.put("takeProfitPercent", adjustedRisk.takeProfitPercent());
+                }
+
+                if (adjustedRisk.userFloorApplied()) {
+                    log.info("[SL_FLOOR] botId={} ATR-SL={}% overridden by user-SL={}% → final={}%",
+                        bot.getId(),
+                        String.format("%.2f", adjustedRisk.atrSlPercent()),
+                        String.format("%.2f", adjustedRisk.userSlPercent()),
+                        String.format("%.2f", adjustedRisk.finalSlPercent()));
+                }
+
                 // ═══ R:R and SL distance validation (BEFORE any scoring) ═══
                 RiskManagementService.RiskCheck rrCheck = riskService.validateRiskReward(
-                    bot, signal.price(), signal.stopLoss(), signal.takeProfit(), params);
+                    bot, signal.price(), adjustedRisk.stopLossPrice(), adjustedRisk.takeProfitPrice(), params);
                 if (!rrCheck.allowed()) {
                     log.info("[RR_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, rrCheck.reason());
                     notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(), rrCheck.reason());
@@ -315,32 +333,9 @@ public class StrategyRunner {
                     bot.getId(), String.format("%.3f", aiResult.confidence()), aiResult.latencyMs());
                 params.put("__aiConfidence", aiResult.confidence());
 
-                // Inject SL/TP from strategy signal — but respect user's stopLossPercent as a FLOOR
-                double atrSlPercent = Math.abs(signal.price() - signal.stopLoss()) / signal.price() * 100;
-                double userSlPercent = params.containsKey("stopLossPercent")
-                    ? ((Number) params.get("stopLossPercent")).doubleValue() : 0.0;
-                double finalSlPercent = Math.max(atrSlPercent, userSlPercent);
-
-                if (finalSlPercent != atrSlPercent) {
-                    log.info("[SL_FLOOR] botId={} ATR-SL={}% overridden by user-SL={}% → final={}%",
-                        bot.getId(), String.format("%.2f", atrSlPercent), String.format("%.2f", userSlPercent), String.format("%.2f", finalSlPercent));
-                }
-                params.put("stopLossPercent", finalSlPercent);
-                params.put("__atrSlPercent", atrSlPercent);
-                params.put("__userSlPercent", userSlPercent);
-
+                // Store TP1 (1:1 R:R) for partial profit booking using the effective SL after any user floor
                 if (signal.takeProfit() != null) {
-                    double tpPercent = Math.abs(signal.takeProfit() - signal.price()) / signal.price() * 100;
-                    // Scale TP proportionally if SL was widened by user floor
-                    if (finalSlPercent > atrSlPercent && atrSlPercent > 0) {
-                        double scaleFactor = finalSlPercent / atrSlPercent;
-                        tpPercent = tpPercent * scaleFactor;
-                    }
-                    params.put("takeProfitPercent", tpPercent);
-                }
-                // Store TP1 (1:1 R:R) for partial profit booking
-                if (signal.takeProfit() != null) {
-                    double risk = Math.abs(signal.price() - signal.stopLoss());
+                    double risk = Math.abs(signal.price() - adjustedRisk.stopLossPrice());
                     double tp1 = signal.price() + risk; // 1:1 R:R
                     params.put("__tp1Price", tp1);
                 }
