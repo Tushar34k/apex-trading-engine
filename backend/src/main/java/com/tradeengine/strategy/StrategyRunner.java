@@ -322,8 +322,8 @@ public class StrategyRunner {
                 double finalSlPercent = Math.max(atrSlPercent, userSlPercent);
 
                 if (finalSlPercent != atrSlPercent) {
-                    log.info("[SL_FLOOR] botId={} ATR-SL={:.2f}% overridden by user-SL={:.2f}% → final={:.2f}%",
-                        bot.getId(), atrSlPercent, userSlPercent, finalSlPercent);
+                    log.info("[SL_FLOOR] botId={} ATR-SL={}% overridden by user-SL={}% → final={}%",
+                        bot.getId(), String.format("%.2f", atrSlPercent), String.format("%.2f", userSlPercent), String.format("%.2f", finalSlPercent));
                 }
                 params.put("stopLossPercent", finalSlPercent);
                 params.put("__atrSlPercent", atrSlPercent);
