@@ -101,27 +101,36 @@ export function CreateBotDialog({ open, onOpenChange }: CreateBotDialogProps) {
     }
 
     try {
-      const fastEma = strategyParams.fastEma ?? 9;
-      const slowEma = strategyParams.slowEma ?? 21;
+      const fastEma = Number(strategyParams.fastEma ?? 9);
+      const slowEma = Number(strategyParams.slowEma ?? 21);
 
-      const finalParams: Record<string, number> = { ...strategyParams };
-      if (enableSL) finalParams.stopLossPercent = stopLossPercent;
-      if (enableTP) finalParams.takeProfitPercent = takeProfitPercent;
-      if (enableTrailing) finalParams.trailingStopPercent = trailingStopPercent;
-      if (maxDailyLossPercent > 0) finalParams.maxDailyLossPercent = maxDailyLossPercent;
+      // Always include risk params — 0 means disabled, never omit them
+      const finalParams: Record<string, number> = {};
+      for (const [k, v] of Object.entries(strategyParams)) {
+        finalParams[k] = Number(v);
+      }
+      finalParams.stopLossPercent = enableSL ? Number(stopLossPercent) : 0;
+      finalParams.takeProfitPercent = enableTP ? Number(takeProfitPercent) : 0;
+      finalParams.trailingStopPercent = enableTrailing ? Number(trailingStopPercent) : 0;
+      finalParams.maxDailyLossPercent = Number(maxDailyLossPercent);
 
-      await createBot.mutateAsync({
+      const payload = {
         name: name.trim(),
         symbol: symbol.trim().toUpperCase(),
         timeframe,
         strategyType,
         fastEma,
         slowEma,
-        tradeSizePercent,
+        tradeSizePercent: Number(tradeSizePercent),
         apiKeyId,
         exchangeMode,
         strategyParams: JSON.stringify(finalParams),
-      });
+      };
+
+      console.log("🚀 Outbound Bot Payload:", payload);
+      console.log("🔑 strategyParams (parsed):", finalParams);
+
+      await createBot.mutateAsync(payload);
       toast({ title: "Bot Created", description: `Bot "${name}" created with ${STRATEGY_CONFIGS[strategyType].label} strategy.` });
       onOpenChange(false);
       resetForm();
