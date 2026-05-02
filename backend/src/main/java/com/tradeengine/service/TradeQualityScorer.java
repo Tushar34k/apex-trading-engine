@@ -23,6 +23,8 @@ import java.util.Map;
 @Slf4j
 public class TradeQualityScorer {
 
+    public enum Tier { FULL, HALF, QUARTER, REJECT }
+
     public record QualityScore(
         int total,
         int trendScore,
@@ -32,7 +34,9 @@ public class TradeQualityScorer {
         int pullbackScore,
         int candleScore,
         String breakdown,
-        boolean passed
+        boolean passed,
+        Tier tier,
+        double sizeMultiplier
     ) {}
 
     /**
