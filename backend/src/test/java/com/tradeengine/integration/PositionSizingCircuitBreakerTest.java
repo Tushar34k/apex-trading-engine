@@ -30,7 +30,7 @@ class PositionSizingCircuitBreakerTest {
     void setup() {
         positionRepo = mock(PositionRepository.class);
         orderRepo = mock(OrderRepository.class);
-        riskService = new RiskManagementService(positionRepo, orderRepo);
+        riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
         when(positionRepo.findByBotIdAndStatus(any(), eq("OPEN"))).thenReturn(List.of());
         when(positionRepo.findByBotId(any())).thenReturn(List.of());
     }
