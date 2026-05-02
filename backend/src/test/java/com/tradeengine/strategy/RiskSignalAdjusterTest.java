@@ -35,7 +35,8 @@ class RiskSignalAdjusterTest {
 
         RiskManagementService riskService = new RiskManagementService(
             mock(PositionRepository.class),
-            mock(OrderRepository.class)
+            mock(OrderRepository.class),
+            new com.tradeengine.service.RejectionMetricsService()
         );
 
         TradingBot bot = new TradingBot();
