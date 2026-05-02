@@ -57,6 +57,8 @@ public class StrategyRunner {
     private final CandleCacheService candleCacheService;
     private final TradeQualityScorer tradeQualityScorer;
     private final AITradeValidationService aiValidationService;
+    private final RejectionMetricsService rejectionMetrics;
+    private final RegimeClassifier regimeClassifier;
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
