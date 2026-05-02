@@ -1105,4 +1105,12 @@ public class StrategyRunner {
         Object val = params.get(key);
         return val instanceof Number ? ((Number) val).doubleValue() : defaultVal;
     }
+
+    /** Count this bot's positions opened in the last N hours (used for safety guard). */
+    private int countTradesPastHours(TradingBot bot, int hours) {
+        Instant cutoff = Instant.now().minus(Duration.ofHours(hours));
+        return (int) positionRepo.findByBotId(bot.getId()).stream()
+            .filter(p -> p.getOpenedAt() != null && p.getOpenedAt().isAfter(cutoff))
+            .count();
+    }
 }
