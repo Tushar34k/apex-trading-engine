@@ -52,7 +52,8 @@ public class TradeQualityScorer {
                               String side, Map<String, Object> params) {
 
         if (closingPrices.size() < 200 || candles.size() < 200) {
-            return new QualityScore(0, 0, 0, 0, 0, 0, 0, "Insufficient data for scoring", false);
+            return new QualityScore(0, 0, 0, 0, 0, 0, 0,
+                "Insufficient data for scoring", false, Tier.REJECT, 0.0);
         }
 
         double[] prices = closingPrices.stream().mapToDouble(d -> d).toArray();
@@ -60,7 +61,8 @@ public class TradeQualityScorer {
         double price = prices[last];
         boolean isBuy = "BUY".equalsIgnoreCase(side);
 
-        int minScore = getInt(params, "minTradeScore", 75);
+        // Lowered default from 75 → 60 (paired with tier-aware sizing). Configurable per-bot.
+        int minScore = getInt(params, "minTradeScore", 60);
 
         // --- 1. Trend Alignment (25 pts) ---
         int trendScore = scoreTrend(prices, last, price, isBuy);
@@ -84,17 +86,29 @@ public class TradeQualityScorer {
         int candleScore = scoreCandleStructure(candles, last, isBuy);
 
         int total = trendScore + volumeScore + rsiScore + volatilityScore + pullbackScore + candleScore;
-        boolean passed = total >= minScore;
+
+        // --- Tier classification (Phase 5) ---
+        // FULL ≥ 70 → 1.0x, HALF ≥ 58 → 0.5x, QUARTER ≥ 50 AND trend-aligned → 0.25x.
+        boolean trendAligned = trendScore >= 15;
+        Tier tier;
+        double sizeMult;
+        if (total >= 70) { tier = Tier.FULL;    sizeMult = 1.0; }
+        else if (total >= 58) { tier = Tier.HALF;    sizeMult = 0.5; }
+        else if (total >= 50 && trendAligned) { tier = Tier.QUARTER; sizeMult = 0.25; }
+        else { tier = Tier.REJECT;  sizeMult = 0.0; }
+
+        boolean passed = total >= minScore && tier != Tier.REJECT;
 
         String breakdown = String.format(
-            "SCORE=%d/%d [trend=%d vol=%d rsi=%d(%.1f) atr=%d pullback=%d candle=%d] %s",
+            "SCORE=%d/%d [trend=%d vol=%d rsi=%d(%.1f) atr=%d pullback=%d candle=%d] tier=%s mult=%.2f %s",
             total, minScore, trendScore, volumeScore, rsiScore, rsi,
-            volatilityScore, pullbackScore, candleScore, passed ? "PASS" : "REJECT");
+            volatilityScore, pullbackScore, candleScore, tier, sizeMult,
+            passed ? "PASS" : "REJECT");
 
         log.info("[TRADE_QUALITY] side={} price={} {}", side, price, breakdown);
 
         return new QualityScore(total, trendScore, volumeScore, rsiScore,
-            volatilityScore, pullbackScore, candleScore, breakdown, passed);
+            volatilityScore, pullbackScore, candleScore, breakdown, passed, tier, sizeMult);
     }
 
     // --- Trend (25 pts): EMA50/EMA200 alignment ---
