@@ -452,7 +452,11 @@ public class StrategyRunner {
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
         // ═══ STRICT RISK-BASED POSITION SIZING WITH CIRCUIT BREAKER ═══
-        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
+        double baseRiskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
+        // Phase 5 — tier-aware sizing (FULL=1.0, HALF=0.5, QUARTER=0.25). Never INCREASES risk.
+        double sizeMultiplier = getDoubleParam(params, "__sizeMultiplier", 1.0);
+        sizeMultiplier = Math.max(0.0, Math.min(1.0, sizeMultiplier));
+        double riskPercent = baseRiskPercent * sizeMultiplier;
         BigDecimal quantity;
 
         BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
