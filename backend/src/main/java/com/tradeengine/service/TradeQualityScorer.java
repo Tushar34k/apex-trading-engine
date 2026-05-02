@@ -128,20 +128,23 @@ public class TradeQualityScorer {
         return 0;                           // Very weak volume
     }
 
-    // --- RSI (15 pts): neutral zone ideal, extremes penalized ---
+    // --- RSI (15 pts): soft penalties only — never hard zero ---
+    // Trend trades MUST be allowed even at extreme RSI; gate is the score, not this filter.
     private int scoreRSI(double rsi, boolean isBuy) {
         if (isBuy) {
-            if (rsi > 70) return 0;          // Overbought — reject buy
-            if (rsi > 60) return 5;
+            if (rsi >= 80) return 4;         // Very overbought — small score (was 0)
+            if (rsi >= 70) return 8;         // Overbought but trending — partial credit
+            if (rsi > 60) return 11;
             if (rsi >= 40) return 15;        // Ideal zone
-            if (rsi >= 30) return 10;        // Oversold can be good for buy
-            return 5;                         // Very oversold — possible bottom
+            if (rsi >= 30) return 10;
+            return 6;
         } else {
-            if (rsi < 30) return 0;          // Oversold — reject sell
-            if (rsi < 40) return 5;
+            if (rsi <= 20) return 4;         // Very oversold — small score (was 0)
+            if (rsi <= 30) return 8;
+            if (rsi < 40) return 11;
             if (rsi <= 60) return 15;
             if (rsi <= 70) return 10;
-            return 5;
+            return 6;
         }
     }
 
@@ -176,21 +179,21 @@ public class TradeQualityScorer {
 
         double distanceFromEma = Math.abs(price - ema21) / atr;
 
+        // Soft pullback ladder — distant entries get reduced credit, never zero.
         if (isBuy) {
-            // For buy: ideal is price near or slightly above EMA21 (pullback retest)
-            if (price < ema21) return 5;          // Below EMA — risky
-            if (distanceFromEma <= 0.5) return 15; // Tight pullback — excellent
-            if (distanceFromEma <= 1.0) return 12;
-            if (distanceFromEma <= 1.5) return 8;
-            if (distanceFromEma <= 2.5) return 4;
-            return 0;                              // Chasing — too far from EMA
+            if (price < ema21) return 6;             // Below EMA — partial (was 5)
+            if (distanceFromEma <= 0.5) return 15;   // Tight pullback — excellent
+            if (distanceFromEma <= 1.0) return 13;
+            if (distanceFromEma <= 2.0) return 10;
+            if (distanceFromEma <= 3.5) return 7;
+            return 4;                                // Chasing — small score (was 0)
         } else {
-            if (price > ema21) return 5;
+            if (price > ema21) return 6;
             if (distanceFromEma <= 0.5) return 15;
-            if (distanceFromEma <= 1.0) return 12;
-            if (distanceFromEma <= 1.5) return 8;
-            if (distanceFromEma <= 2.5) return 4;
-            return 0;
+            if (distanceFromEma <= 1.0) return 13;
+            if (distanceFromEma <= 2.0) return 10;
+            if (distanceFromEma <= 3.5) return 7;
+            return 4;
         }
     }
 
