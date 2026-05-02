@@ -112,7 +112,7 @@ class RiskCircuitBreakerTest {
     void noStopLossRejected() {
         var positionRepo = mock(PositionRepository.class);
         var orderRepo = mock(OrderRepository.class);
-        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo);
+        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
 
         var bot = mock(TradingBot.class);
         when(bot.getId()).thenReturn(UUID.randomUUID());
@@ -130,7 +130,7 @@ class RiskCircuitBreakerTest {
     void badRiskRewardRejected() {
         var positionRepo = mock(PositionRepository.class);
         var orderRepo = mock(OrderRepository.class);
-        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo);
+        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
 
         var bot = mock(TradingBot.class);
         when(bot.getId()).thenReturn(UUID.randomUUID());
@@ -162,7 +162,7 @@ class RiskCircuitBreakerTest {
     void slTooWideRejected() {
         var positionRepo = mock(PositionRepository.class);
         var orderRepo = mock(OrderRepository.class);
-        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo);
+        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
 
         var bot = mock(TradingBot.class);
         when(bot.getId()).thenReturn(UUID.randomUUID());
@@ -198,7 +198,7 @@ class RiskCircuitBreakerTest {
     void rateLimitingEnforced() {
         var positionRepo = mock(PositionRepository.class);
         var orderRepo = mock(OrderRepository.class);
-        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo);
+        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
 
         var bot = mock(TradingBot.class);
         when(bot.getId()).thenReturn(UUID.randomUUID());
@@ -226,7 +226,7 @@ class RiskCircuitBreakerTest {
     void postLossCooldownEnforced() {
         var positionRepo = mock(PositionRepository.class);
         var orderRepo = mock(OrderRepository.class);
-        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo);
+        RiskManagementService riskService = new RiskManagementService(positionRepo, orderRepo, new com.tradeengine.service.RejectionMetricsService());
 
         var bot = mock(TradingBot.class);
         when(bot.getId()).thenReturn(UUID.randomUUID());

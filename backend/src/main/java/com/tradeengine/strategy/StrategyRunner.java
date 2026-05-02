@@ -57,6 +57,8 @@ public class StrategyRunner {
     private final CandleCacheService candleCacheService;
     private final TradeQualityScorer tradeQualityScorer;
     private final AITradeValidationService aiValidationService;
+    private final RejectionMetricsService rejectionMetrics;
+    private final RegimeClassifier regimeClassifier;
     @Value("${live-trading.enabled:false}")
     private boolean liveTradingEnabled;
 
@@ -261,9 +263,12 @@ public class StrategyRunner {
 
             if (signal.signal() == TradingStrategy.Signal.BUY && !bot.isHasOpenPosition()) {
 
+                String botIdStr = bot.getId().toString();
+
                 // ═══ CRITICAL: Reject trades without stop loss ═══
                 if (signal.stopLoss() == null || signal.stopLoss() <= 0) {
                     log.warn("[RISK_REJECTED] botId={} symbol={} NO STOP LOSS — trade blocked", bot.getId(), exchangeSymbol);
+                    rejectionMetrics.record(botIdStr, "RISK", "NO_STOP_LOSS", null);
                     notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
                         "No stop loss defined — every trade MUST have SL");
                     return;
@@ -287,25 +292,51 @@ public class StrategyRunner {
                         String.format("%.2f", adjustedRisk.finalSlPercent()));
                 }
 
-                // ═══ R:R and SL distance validation (BEFORE any scoring) ═══
+                // ── Compute ATR% (Phase 4 adaptive SL/RR inputs) ──
+                double atrPctForRisk = adjustedRisk.atrSlPercent() > 0
+                    ? adjustedRisk.atrSlPercent()
+                    : -1;
+                if (atrPctForRisk > 0) params.put("__atrPercent", atrPctForRisk);
+
+                // ── Regime classification (Phase 6): tune minTradeScore per regime ──
+                RegimeClassifier.Regime regime = regimeClassifier.classify(closingPrices, candles);
+                params.put("__regime", regime.name());
+                int baseMinScore = ((Number) params.getOrDefault("minTradeScore", 60)).intValue();
+                int adaptiveMinScore = switch (regime) {
+                    case TREND     -> Math.max(50, baseMinScore - 8);   // allow more entries in trends
+                    case RANGE     -> baseMinScore;
+                    case CHOP      -> baseMinScore + 5;                 // be pickier in chop
+                    case HIGH_VOL  -> baseMinScore + 3;                 // size cut handled by tier
+                };
+                // Phase: safety guard — if bot already traded a lot today, raise threshold by +5
+                if (countTradesPastHours(bot, 24) > 20) adaptiveMinScore += 5;
+                params.put("minTradeScore", adaptiveMinScore);
+
+                // ── Quality scoring FIRST (so adaptive RR has access to score) ──
+                TradeQualityScorer.QualityScore qualityScore = tradeQualityScorer.score(
+                    closingPrices, candles, "BUY", params);
+                if (!qualityScore.passed()) {
+                    log.info("[QUALITY_REJECTED] botId={} symbol={} regime={} {}",
+                        bot.getId(), exchangeSymbol, regime, qualityScore.breakdown());
+                    rejectionMetrics.record(botIdStr, "SCORER", "LOW_SCORE", qualityScore.total());
+                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                        "Trade quality too low: " + qualityScore.total() + "/100 (min " + adaptiveMinScore + ", regime=" + regime + ")");
+                    return;
+                }
+                log.info("[QUALITY_PASSED] botId={} regime={} {}", bot.getId(), regime, qualityScore.breakdown());
+                params.put("__qualityScore", qualityScore.total());
+                params.put("__tier", qualityScore.tier().name());
+                params.put("__sizeMultiplier", qualityScore.sizeMultiplier());
+
+                // ═══ R:R and SL distance validation (now adaptive via __qualityScore + __atrPercent) ═══
                 RiskManagementService.RiskCheck rrCheck = riskService.validateRiskReward(
                     bot, signal.price(), adjustedRisk.stopLossPrice(), adjustedRisk.takeProfitPrice(), params);
                 if (!rrCheck.allowed()) {
                     log.info("[RR_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, rrCheck.reason());
+                    // Telemetry already recorded inside RiskManagementService.reject()
                     notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(), rrCheck.reason());
                     return;
                 }
-
-                // --- Trade Quality Score gate ---
-                TradeQualityScorer.QualityScore qualityScore = tradeQualityScorer.score(
-                    closingPrices, candles, "BUY", params);
-                if (!qualityScore.passed()) {
-                    log.info("[QUALITY_REJECTED] botId={} symbol={} {}", bot.getId(), exchangeSymbol, qualityScore.breakdown());
-                    notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
-                        "Trade quality too low: " + qualityScore.total() + "/100 (min " + params.getOrDefault("minTradeScore", 75) + ")");
-                    return;
-                }
-                log.info("[QUALITY_PASSED] botId={} {}", bot.getId(), qualityScore.breakdown());
 
                 // --- AI Trade Validation Layer ---
                 List<Double> higherTfClosingPrices = null;
@@ -325,6 +356,7 @@ public class StrategyRunner {
                 if (!aiResult.isApproved()) {
                     log.info("[AI_REJECTED] botId={} symbol={} confidence={} reason={}",
                         bot.getId(), exchangeSymbol, String.format("%.3f", aiResult.confidence()), aiResult.reason());
+                    rejectionMetrics.record(botIdStr, "AI", "LOW_CONFIDENCE", (int) Math.round(aiResult.confidence() * 100));
                     notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
                         "AI rejected: confidence=" + String.format("%.2f", aiResult.confidence()) + " — " + aiResult.reason());
                     return;
@@ -332,6 +364,9 @@ public class StrategyRunner {
                 log.info("[AI_APPROVED] botId={} confidence={} latency={}ms",
                     bot.getId(), String.format("%.3f", aiResult.confidence()), aiResult.latencyMs());
                 params.put("__aiConfidence", aiResult.confidence());
+
+                // ═══ EXECUTION TELEMETRY — trade is allowed through all gates ═══
+                rejectionMetrics.record(botIdStr, "EXECUTION", "TRADE_ALLOWED", qualityScore.total());
 
                 // Store TP1 (1:1 R:R) for partial profit booking using the effective SL after any user floor
                 if (signal.takeProfit() != null) {
@@ -417,7 +452,11 @@ public class StrategyRunner {
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
         // ═══ STRICT RISK-BASED POSITION SIZING WITH CIRCUIT BREAKER ═══
-        double riskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
+        double baseRiskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
+        // Phase 5 — tier-aware sizing (FULL=1.0, HALF=0.5, QUARTER=0.25). Never INCREASES risk.
+        double sizeMultiplier = getDoubleParam(params, "__sizeMultiplier", 1.0);
+        sizeMultiplier = Math.max(0.0, Math.min(1.0, sizeMultiplier));
+        double riskPercent = baseRiskPercent * sizeMultiplier;
         BigDecimal quantity;
 
         BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
@@ -1065,5 +1104,13 @@ public class StrategyRunner {
     private double getDoubleParam(Map<String, Object> params, String key, double defaultVal) {
         Object val = params.get(key);
         return val instanceof Number ? ((Number) val).doubleValue() : defaultVal;
+    }
+
+    /** Count this bot's positions opened in the last N hours (used for safety guard). */
+    private int countTradesPastHours(TradingBot bot, int hours) {
+        Instant cutoff = Instant.now().minus(Duration.ofHours(hours));
+        return (int) positionRepo.findByBotId(bot.getId()).stream()
+            .filter(p -> p.getOpenedAt() != null && p.getOpenedAt().isAfter(cutoff))
+            .count();
     }
 }

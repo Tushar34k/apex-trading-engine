@@ -23,6 +23,8 @@ import java.util.Map;
 @Slf4j
 public class TradeQualityScorer {
 
+    public enum Tier { FULL, HALF, QUARTER, REJECT }
+
     public record QualityScore(
         int total,
         int trendScore,
@@ -32,7 +34,9 @@ public class TradeQualityScorer {
         int pullbackScore,
         int candleScore,
         String breakdown,
-        boolean passed
+        boolean passed,
+        Tier tier,
+        double sizeMultiplier
     ) {}
 
     /**
@@ -48,7 +52,8 @@ public class TradeQualityScorer {
                               String side, Map<String, Object> params) {
 
         if (closingPrices.size() < 200 || candles.size() < 200) {
-            return new QualityScore(0, 0, 0, 0, 0, 0, 0, "Insufficient data for scoring", false);
+            return new QualityScore(0, 0, 0, 0, 0, 0, 0,
+                "Insufficient data for scoring", false, Tier.REJECT, 0.0);
         }
 
         double[] prices = closingPrices.stream().mapToDouble(d -> d).toArray();
@@ -56,7 +61,8 @@ public class TradeQualityScorer {
         double price = prices[last];
         boolean isBuy = "BUY".equalsIgnoreCase(side);
 
-        int minScore = getInt(params, "minTradeScore", 75);
+        // Lowered default from 75 → 60 (paired with tier-aware sizing). Configurable per-bot.
+        int minScore = getInt(params, "minTradeScore", 60);
 
         // --- 1. Trend Alignment (25 pts) ---
         int trendScore = scoreTrend(prices, last, price, isBuy);
@@ -80,17 +86,29 @@ public class TradeQualityScorer {
         int candleScore = scoreCandleStructure(candles, last, isBuy);
 
         int total = trendScore + volumeScore + rsiScore + volatilityScore + pullbackScore + candleScore;
-        boolean passed = total >= minScore;
+
+        // --- Tier classification (Phase 5) ---
+        // FULL ≥ 70 → 1.0x, HALF ≥ 58 → 0.5x, QUARTER ≥ 50 AND trend-aligned → 0.25x.
+        boolean trendAligned = trendScore >= 15;
+        Tier tier;
+        double sizeMult;
+        if (total >= 70) { tier = Tier.FULL;    sizeMult = 1.0; }
+        else if (total >= 58) { tier = Tier.HALF;    sizeMult = 0.5; }
+        else if (total >= 50 && trendAligned) { tier = Tier.QUARTER; sizeMult = 0.25; }
+        else { tier = Tier.REJECT;  sizeMult = 0.0; }
+
+        boolean passed = total >= minScore && tier != Tier.REJECT;
 
         String breakdown = String.format(
-            "SCORE=%d/%d [trend=%d vol=%d rsi=%d(%.1f) atr=%d pullback=%d candle=%d] %s",
+            "SCORE=%d/%d [trend=%d vol=%d rsi=%d(%.1f) atr=%d pullback=%d candle=%d] tier=%s mult=%.2f %s",
             total, minScore, trendScore, volumeScore, rsiScore, rsi,
-            volatilityScore, pullbackScore, candleScore, passed ? "PASS" : "REJECT");
+            volatilityScore, pullbackScore, candleScore, tier, sizeMult,
+            passed ? "PASS" : "REJECT");
 
         log.info("[TRADE_QUALITY] side={} price={} {}", side, price, breakdown);
 
         return new QualityScore(total, trendScore, volumeScore, rsiScore,
-            volatilityScore, pullbackScore, candleScore, breakdown, passed);
+            volatilityScore, pullbackScore, candleScore, breakdown, passed, tier, sizeMult);
     }
 
     // --- Trend (25 pts): EMA50/EMA200 alignment ---
@@ -128,20 +146,23 @@ public class TradeQualityScorer {
         return 0;                           // Very weak volume
     }
 
-    // --- RSI (15 pts): neutral zone ideal, extremes penalized ---
+    // --- RSI (15 pts): soft penalties only — never hard zero ---
+    // Trend trades MUST be allowed even at extreme RSI; gate is the score, not this filter.
     private int scoreRSI(double rsi, boolean isBuy) {
         if (isBuy) {
-            if (rsi > 70) return 0;          // Overbought — reject buy
-            if (rsi > 60) return 5;
+            if (rsi >= 80) return 4;         // Very overbought — small score (was 0)
+            if (rsi >= 70) return 8;         // Overbought but trending — partial credit
+            if (rsi > 60) return 11;
             if (rsi >= 40) return 15;        // Ideal zone
-            if (rsi >= 30) return 10;        // Oversold can be good for buy
-            return 5;                         // Very oversold — possible bottom
+            if (rsi >= 30) return 10;
+            return 6;
         } else {
-            if (rsi < 30) return 0;          // Oversold — reject sell
-            if (rsi < 40) return 5;
+            if (rsi <= 20) return 4;         // Very oversold — small score (was 0)
+            if (rsi <= 30) return 8;
+            if (rsi < 40) return 11;
             if (rsi <= 60) return 15;
             if (rsi <= 70) return 10;
-            return 5;
+            return 6;
         }
     }
 
@@ -176,21 +197,21 @@ public class TradeQualityScorer {
 
         double distanceFromEma = Math.abs(price - ema21) / atr;
 
+        // Soft pullback ladder — distant entries get reduced credit, never zero.
         if (isBuy) {
-            // For buy: ideal is price near or slightly above EMA21 (pullback retest)
-            if (price < ema21) return 5;          // Below EMA — risky
-            if (distanceFromEma <= 0.5) return 15; // Tight pullback — excellent
-            if (distanceFromEma <= 1.0) return 12;
-            if (distanceFromEma <= 1.5) return 8;
-            if (distanceFromEma <= 2.5) return 4;
-            return 0;                              // Chasing — too far from EMA
+            if (price < ema21) return 6;             // Below EMA — partial (was 5)
+            if (distanceFromEma <= 0.5) return 15;   // Tight pullback — excellent
+            if (distanceFromEma <= 1.0) return 13;
+            if (distanceFromEma <= 2.0) return 10;
+            if (distanceFromEma <= 3.5) return 7;
+            return 4;                                // Chasing — small score (was 0)
         } else {
-            if (price > ema21) return 5;
+            if (price > ema21) return 6;
             if (distanceFromEma <= 0.5) return 15;
-            if (distanceFromEma <= 1.0) return 12;
-            if (distanceFromEma <= 1.5) return 8;
-            if (distanceFromEma <= 2.5) return 4;
-            return 0;
+            if (distanceFromEma <= 1.0) return 13;
+            if (distanceFromEma <= 2.0) return 10;
+            if (distanceFromEma <= 3.5) return 7;
+            return 4;
         }
     }
 
