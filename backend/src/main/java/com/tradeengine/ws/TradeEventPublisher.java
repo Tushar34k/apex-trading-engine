@@ -6,9 +6,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
-import java.util.HashMap;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.Map;
 
 @Service
@@ -65,7 +65,7 @@ public class TradeEventPublisher {
         log.info("Published TRADE_OPENED for user {}", userId);
     }
 
-  public void publishPositionClosed(String userId, TradePosition position, BigDecimal pnl) {
+    public void publishPositionClosed(String userId, TradePosition position, BigDecimal pnl) {
         Map<String, Object> trade = new HashMap<>();
         trade.put("id", position.getId());
         trade.put("symbol", position.getSymbol());

@@ -90,7 +90,19 @@ public class AITradeValidationService {
             int last = prices.length - 1;
             double price = prices[last];
             boolean isBuy = "BUY".equalsIgnoreCase(side);
-            double minConfidence = getDouble(params, "aiMinConfidence", MIN_CONFIDENCE);
+            String regime = detectRegime(prices);
+//            double minConfidence = getDouble(params, "aiMinConfidence", MIN_CONFIDENCE);
+
+            double baseMin = getDouble(params, "aiMinConfidence", MIN_CONFIDENCE);
+            double minConfidence;
+
+            if ("TRENDING".equals(regime)) {
+                minConfidence = Math.min(baseMin, 0.65);
+            } else if ("RANGING".equals(regime)) {
+                minConfidence = Math.max(baseMin, 0.80);
+            } else {
+                minConfidence = baseMin;
+            }
 
             Map<String, Double> factors = computeFactors(prices, last, price, isBuy, candles, higherTfPrices, fundingRate, params);
 
@@ -98,8 +110,15 @@ public class AITradeValidationService {
             long latencyMs = (System.nanoTime() - startNanos) / 1_000_000;
 
             // Hard rejection rules
+            String strategyType = (String) params.getOrDefault("strategyType", "TREND");
             List<String> hardRejects = new ArrayList<>();
-            if (factors.getOrDefault("trend", 0.0) < 0.25) hardRejects.add("trend_misaligned");
+            double trendScore = factors.getOrDefault("trend", 0.0);
+
+            if ("TREND".equalsIgnoreCase(strategyType)) {
+                if (trendScore < 0.25) hardRejects.add("trend_misaligned");
+            } else if ("MEAN_REVERSION".equalsIgnoreCase(strategyType)) {
+                if (trendScore < 0.10) hardRejects.add("extreme_trend_misaligned");
+            }
             if (factors.getOrDefault("momentum", 0.0) < 0.2) hardRejects.add("no_momentum");
             if (factors.getOrDefault("volume", 0.0) < 0.2) hardRejects.add("weak_volume");
             if (factors.getOrDefault("volatility", 0.0) < 0.15) hardRejects.add("dead_market");
@@ -108,6 +127,21 @@ public class AITradeValidationService {
                 String reason = String.format("HARD_REJECT: %s | conf=%.3f | %s",
                     String.join("+", hardRejects), confidence, formatFactors(factors));
                 return logAndReturn(botId, symbol, side, exchange, Decision.REJECT, confidence, reason, factors, latencyMs);
+            }
+
+            double stopLoss = getDouble(params, "stopLoss", 0);
+            double takeProfit = getDouble(params, "takeProfit", 0);
+
+            if (stopLoss > 0 && takeProfit > 0) {
+                double risk = Math.abs(price - stopLoss);
+                double reward = Math.abs(takeProfit - price);
+                double rr = risk > 0 ? reward / risk : 0;
+
+                if (rr < 1.8) {
+                    String reason = String.format("LOW_RR: %.2f < 1.8 | conf=%.3f", rr, confidence);
+                    return logAndReturn(botId, symbol, side, exchange,
+                            Decision.REJECT, confidence, reason, factors, latencyMs);
+                }
             }
 
             if (confidence < minConfidence) {
@@ -124,6 +158,18 @@ public class AITradeValidationService {
             log.error("[AI_ERROR] botId={} symbol={} error={} — SKIPPING TRADE", botId, symbol, e.getMessage(), e);
             return new AIValidationResult(Decision.REJECT, 0, "AI_ERROR: " + e.getMessage(), Map.of(), latencyMs);
         }
+    }
+
+    private String detectRegime(double[] prices) {
+        int last = prices.length - 1;
+        double ema50 = ema(prices, 50, last);
+        double ema200 = ema(prices, 200, last);
+
+        double spread = Math.abs(ema50 - ema200) / ema200;
+
+        if (spread > 0.02) return "TRENDING";
+        if (spread < 0.005) return "RANGING";
+        return "NEUTRAL";
     }
 
     // ─── Factor Computation ───
@@ -146,17 +192,17 @@ public class AITradeValidationService {
 
     private double computeWeightedConfidence(Map<String, Double> f) {
         double c = f.getOrDefault("trend", 0.0) * 0.15
-            + f.getOrDefault("momentum", 0.0) * 0.15
-            + f.getOrDefault("volume", 0.0) * 0.12
-            + f.getOrDefault("rsi", 0.0) * 0.10
-            + f.getOrDefault("volatility", 0.0) * 0.10
-            + f.getOrDefault("funding", 0.0) * 0.08
-            + f.getOrDefault("mtf", 0.0) * 0.12
-            + f.getOrDefault("candle", 0.0) * 0.10
-            + f.getOrDefault("pullback", 0.0) * 0.08;
+                + f.getOrDefault("momentum", 0.0) * 0.15   // FIXED
+                + f.getOrDefault("volume", 0.0) * 0.12
+                + f.getOrDefault("rsi", 0.0) * 0.10
+                + f.getOrDefault("volatility", 0.0) * 0.10
+                + f.getOrDefault("funding", 0.0) * 0.08
+                + f.getOrDefault("mtf", 0.0) * 0.12        // FIXED
+                + f.getOrDefault("candle", 0.0) * 0.10
+                + f.getOrDefault("pullback", 0.0) * 0.08;
+
         return Math.max(0, Math.min(1, c));
     }
-
     // ─── Factor 1: Trend (EMA50/200) — 15% ───
 
     private double scoreTrend(double[] prices, int last, double price, boolean isBuy) {

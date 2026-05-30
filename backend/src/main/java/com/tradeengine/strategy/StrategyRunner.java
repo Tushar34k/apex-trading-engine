@@ -138,10 +138,9 @@ public class StrategyRunner {
             if (bot.isHasOpenPosition() && bot.getEntryPrice() != null) {
                 Double freshPrice = streamService.getFreshPrice(exchangeName, exchangeSymbol);
                 BigDecimal currentPrice;
-                if (freshPrice != null) {
+                if (freshPrice != null && freshPrice > 0) {
                     currentPrice = BigDecimal.valueOf(freshPrice);
                 } else {
-                    log.debug("Bot {} price stale/missing for {}, falling back to REST via {}", bot.getId(), exchangeSymbol, exchangeName);
                     currentPrice = exchangeClient.getPrice(exchangeSymbol, exchangeBaseUrl);
                 }
 
@@ -462,8 +461,8 @@ public class StrategyRunner {
         BigDecimal riskAmount = usdtBalance.multiply(BigDecimal.valueOf(riskPercent / 100));
         BigDecimal slDistance = currentPrice.subtract(BigDecimal.valueOf(signal.stopLoss())).abs();
 
-        if (slDistance.compareTo(BigDecimal.ZERO) <= 0) {
-            log.error("[RISK_REJECTED] botId={} SL distance is zero — cannot size position", bot.getId());
+        if (slDistance.compareTo(BigDecimal.valueOf(0.0000001)) <= 0) {
+            log.error("[RISK_REJECTED] botId={} SL distance too small: {}", bot.getId(), slDistance);
             return;
         }
 
@@ -535,10 +534,27 @@ public class StrategyRunner {
         sizingAudit.put("impliedLeverage", quantity.multiply(currentPrice).doubleValue() / Math.max(1.0, usdtBalance.doubleValue()));
         sizingAudit.put("status", wasCapped ? "SIZE_CAPPED" : "PASSED");
         com.tradeengine.controller.RiskMonitorController.recordSizingEvaluation(sizingAudit);
+//
+//        quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
+//        if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
+//            log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE — balance too small for this asset", bot.getId());
+//            return;
+//        }
 
-        quantity = symbolInfo != null ? symbolInfo.roundQuantity(quantity) : quantity.setScale(6, RoundingMode.DOWN);
+        if (symbolInfo != null) {
+            quantity = symbolInfo.roundQuantity(quantity);
+
+            String validationError = symbolInfo.validate(quantity, currentPrice);
+            if (validationError != null) {
+                log.warn("[LOT_SIZE_INVALID] botId={} symbol={} error={}", bot.getId(), exchangeSymbol, validationError);
+                return;
+            }
+        } else {
+            quantity = quantity.setScale(6, RoundingMode.DOWN);
+        }
+
         if (quantity.compareTo(BigDecimal.ZERO) <= 0) {
-            log.warn("Bot {}: quantity rounds to 0 after LOT_SIZE — balance too small for this asset", bot.getId());
+            log.warn("[LOT_SIZE_ZERO] botId={} symbol={} quantity rounded to 0", bot.getId(), exchangeSymbol);
             return;
         }
 
@@ -747,7 +763,14 @@ public class StrategyRunner {
                 if (result.isSuccess()) {
                     killSwitch.recordTradeSuccess();
                     TradingBot freshBot = botRepo.findById(bot.getId()).orElse(bot);
+//                    BigDecimal remaining = freshBot.getQuantity().subtract(result.getExecutedQty());
+//                    freshBot.setQuantity(remaining.max(BigDecimal.ZERO));
                     BigDecimal remaining = freshBot.getQuantity().subtract(result.getExecutedQty());
+
+                    if (symbolInfo != null) {
+                        remaining = symbolInfo.roundQuantity(remaining);
+                    }
+
                     freshBot.setQuantity(remaining.max(BigDecimal.ZERO));
                     botRepo.save(freshBot);
 
@@ -913,12 +936,12 @@ public class StrategyRunner {
             OrderResponse tpOrder = client.placeTakeProfitMarketOrder(
                 apiKey, apiSecret, exchangeSymbol, "SELL",
                 result.getExecutedQty(), tpPrice, exchangeBaseUrl);
-            log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} stopPrice={} orderId={}",
-                freshBot.getId(), exchangeSymbol, tpPrice, tpOrder.getOrderId());
+            log.info("[TAKE_PROFIT_PLACED] botId={} symbol={} tpPrice={} orderId={}",
+                    freshBot.getId(), exchangeSymbol, tpPrice, tpOrder.getOrderId());
 
         } catch (Exception e) {
             log.error("[PROTECTIVE_ORDER_FAILED] botId={} symbol={} error={} — falling back to PositionRiskManager monitoring",
-                freshBot.getId(), exchangeSymbol, e.getMessage());
+                    freshBot.getId(), exchangeSymbol, e.getMessage());
         }
 
         // Register with PositionTracker for real-time risk monitoring

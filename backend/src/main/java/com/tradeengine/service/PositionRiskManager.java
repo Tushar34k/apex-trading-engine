@@ -1,3 +1,158 @@
+//package com.tradeengine.service;
+//
+//import com.tradeengine.execution.TradeExecutionQueue;
+//import com.tradeengine.execution.TradeRequest;
+//import com.tradeengine.service.PositionTracker.TrackedPosition;
+//import lombok.RequiredArgsConstructor;
+//import lombok.extern.slf4j.Slf4j;
+//import org.springframework.scheduling.annotation.Scheduled;
+//import org.springframework.stereotype.Service;
+//
+//import java.math.BigDecimal;
+//import java.math.RoundingMode;
+//import java.time.Instant;
+//
+///**
+// * Scheduled risk manager that monitors all tracked positions every 3 seconds.
+// * Automatically triggers SELL orders when SL/TP/trailing stop conditions are met.
+// * Uses the existing TradeExecutionQueue for safe, serialized order submission.
+// */
+//@Service
+//@RequiredArgsConstructor
+//@Slf4j
+//public class PositionRiskManager {
+//
+//    private final PositionTracker positionTracker;
+//    private final MarketPriceMonitor priceMonitor;
+//    private final TradeExecutionQueue executionQueue;
+//    private final KillSwitchService killSwitch;
+//    private final TrailingStopService trailingStopService;
+//
+//    @Scheduled(fixedDelay = 3000)
+//    public void checkPositions() {
+//        if (killSwitch.isActive()) return;
+//
+//        for (TrackedPosition pos : positionTracker.getAllPositions()) {
+//            try {
+//                checkPosition(pos);
+//            } catch (Exception e) {
+//                log.error("[RISK_MANAGER] Error checking position botId={}: {}",
+//                    pos.getBotId(), e.getMessage(), e);
+//            }
+//        }
+//    }
+//
+//    private void checkPosition(TrackedPosition pos) {
+//        BigDecimal currentPrice = priceMonitor.getCurrentPrice(
+//            pos.getSymbol(), pos.getExchange(), pos.getExchangeBaseUrl());
+//
+//        if (currentPrice == null) {
+//            log.debug("[RISK_MANAGER] No price available for {} on {}", pos.getSymbol(), pos.getExchange());
+//            return;
+//        }
+//
+//        // Update price extremes
+//        positionTracker.updatePriceExtremes(pos.getBotId(), currentPrice);
+//
+//        boolean isShort = "SHORT".equalsIgnoreCase(pos.getSide());
+//
+//        // --- Stop Loss ---
+//        if (pos.getStopLossPrice() != null) {
+//            // LONG: SL triggers when price falls below stop → currentPrice <= SL
+//            // SHORT: SL triggers when price rises above stop → currentPrice >= SL
+//            boolean slTriggered = isShort
+//                ? currentPrice.compareTo(pos.getStopLossPrice()) >= 0
+//                : currentPrice.compareTo(pos.getStopLossPrice()) <= 0;
+//
+//            if (slTriggered) {
+//                log.warn("[POSITION_CLOSED] reason=STOP_LOSS botId={} symbol={} side={} price={} stopLoss={}",
+//                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getStopLossPrice());
+//                submitExitOrder(pos, "BOT_SL");
+//                return;
+//            }
+//        }
+//
+//        // --- Take Profit ---
+//        if (pos.getTakeProfitPrice() != null) {
+//            // LONG: TP triggers when price rises above target → currentPrice >= TP
+//            // SHORT: TP triggers when price falls below target → currentPrice <= TP
+//            boolean tpTriggered = isShort
+//                ? currentPrice.compareTo(pos.getTakeProfitPrice()) <= 0
+//                : currentPrice.compareTo(pos.getTakeProfitPrice()) >= 0;
+//
+//            if (tpTriggered) {
+//                log.info("[POSITION_CLOSED] reason=TAKE_PROFIT botId={} symbol={} side={} price={} takeProfit={}",
+//                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getTakeProfitPrice());
+//                submitExitOrder(pos, "BOT_TP");
+//                return;
+//            }
+//        }
+//
+//        // --- Trailing Stop ---
+//        if (pos.getTrailingStopPercent() != null) {
+//            boolean triggered = trailingStopService.checkTrailingStop(
+//                pos.getBotId(), currentPrice, pos.getEntryPrice(),
+//                pos.getTrailingStopPercent().doubleValue());
+//
+//            if (triggered) {
+//                BigDecimal hwm = trailingStopService.getHighWaterMark(pos.getBotId());
+//                log.warn("[POSITION_CLOSED] reason=TRAILING_STOP botId={} symbol={} price={} hwm={} trailingPct={}%",
+//                    pos.getBotId(), pos.getSymbol(), currentPrice, hwm, pos.getTrailingStopPercent());
+//                submitExitOrder(pos, "BOT_TRAILING_SL");
+//                return;
+//            }
+//        }
+//    }
+//
+//    private void submitExitOrder(TrackedPosition pos, String notificationType) {
+//        // Mark position as exiting to prevent duplicate exit attempts
+//        // Do NOT remove from tracker yet — only remove after successful execution
+//        // to preserve tracking if the trade fails
+//        positionTracker.removePosition(pos.getBotId());
+//
+//        // LONG positions exit with SELL, SHORT positions exit with BUY
+//        String exitSide = "SHORT".equalsIgnoreCase(pos.getSide()) ? "BUY" : "SELL";
+//
+//        TradeRequest request = TradeRequest.builder()
+//            .botId(pos.getBotId())
+//            .userId(pos.getUserId())
+//            .symbol(pos.getSymbol())
+//            .side(exitSide)
+//            .quantity(pos.getQuantity())
+//            .orderType("MARKET")
+//            .apiKey(pos.getApiKey())
+//            .apiSecret(pos.getApiSecret())
+//            .exchangeBaseUrl(pos.getExchangeBaseUrl())
+//            .exchange(pos.getExchange())
+//            .exchangeMode(pos.getExchangeMode())
+//            .notificationType(notificationType)
+//            .timestamp(Instant.now())
+//            .build();
+//
+//        executionQueue.submitTrade(request);
+//
+//        // Re-register position if trade submission fails so it can be retried
+//        request.getResultFuture()
+//            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+//            .thenAccept(result -> {
+//                if (!result.isSuccess()) {
+//                    log.error("[RISK_EXIT_FAILED] Re-registering position for botId={} symbol={} — trade failed: {}",
+//                        pos.getBotId(), pos.getSymbol(), result.getErrorMessage());
+//                    positionTracker.registerPosition(pos);
+//                }
+//            })
+//            .exceptionally(ex -> {
+//                log.error("[RISK_EXIT_TIMEOUT] Re-registering position for botId={} symbol={} — {}",
+//                    pos.getBotId(), pos.getSymbol(), ex.getMessage());
+//                positionTracker.registerPosition(pos);
+//                return null;
+//            });
+//
+//        log.info("[RISK_EXIT] Submitted SELL for botId={} symbol={} qty={} reason={}",
+//            pos.getBotId(), pos.getSymbol(), pos.getQuantity(), notificationType);
+//    }
+//}
+
 package com.tradeengine.service;
 
 import com.tradeengine.execution.TradeExecutionQueue;
@@ -9,13 +164,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 
 /**
- * Scheduled risk manager that monitors all tracked positions every 3 seconds.
- * Automatically triggers SELL orders when SL/TP/trailing stop conditions are met.
- * Uses the existing TradeExecutionQueue for safe, serialized order submission.
+ * Monitors all open positions and triggers exits (SL / TP / Trailing).
+ * Runs every 3 seconds.
  */
 @Service
 @RequiredArgsConstructor
@@ -30,125 +183,158 @@ public class PositionRiskManager {
 
     @Scheduled(fixedDelay = 3000)
     public void checkPositions() {
-        if (killSwitch.isActive()) return;
+
+        if (killSwitch.isActive()) {
+            log.warn("[RISK_MANAGER] Kill switch active — skipping position checks");
+            return;
+        }
 
         for (TrackedPosition pos : positionTracker.getAllPositions()) {
             try {
                 checkPosition(pos);
             } catch (Exception e) {
-                log.error("[RISK_MANAGER] Error checking position botId={}: {}",
-                    pos.getBotId(), e.getMessage(), e);
+                log.error("[RISK_MANAGER] Error botId={} error={}",
+                        pos.getBotId(), e.getMessage(), e);
             }
         }
     }
 
     private void checkPosition(TrackedPosition pos) {
-        BigDecimal currentPrice = priceMonitor.getCurrentPrice(
-            pos.getSymbol(), pos.getExchange(), pos.getExchangeBaseUrl());
+
+        // ✅ Use SAFE price method (prevents null/0 bugs)
+        BigDecimal currentPrice = priceMonitor.getSafePrice(
+                pos.getSymbol(),
+                pos.getExchange(),
+                pos.getExchangeBaseUrl()
+        );
 
         if (currentPrice == null) {
-            log.debug("[RISK_MANAGER] No price available for {} on {}", pos.getSymbol(), pos.getExchange());
+            log.debug("[RISK_MANAGER] No valid price for {} on {}",
+                    pos.getSymbol(), pos.getExchange());
             return;
         }
 
-        // Update price extremes
+        // Update HWM / LWM
         positionTracker.updatePriceExtremes(pos.getBotId(), currentPrice);
 
         boolean isShort = "SHORT".equalsIgnoreCase(pos.getSide());
 
-        // --- Stop Loss ---
+        // ================= STOP LOSS =================
         if (pos.getStopLossPrice() != null) {
-            // LONG: SL triggers when price falls below stop → currentPrice <= SL
-            // SHORT: SL triggers when price rises above stop → currentPrice >= SL
+
             boolean slTriggered = isShort
-                ? currentPrice.compareTo(pos.getStopLossPrice()) >= 0
-                : currentPrice.compareTo(pos.getStopLossPrice()) <= 0;
+                    ? currentPrice.compareTo(pos.getStopLossPrice()) >= 0
+                    : currentPrice.compareTo(pos.getStopLossPrice()) <= 0;
 
             if (slTriggered) {
-                log.warn("[POSITION_CLOSED] reason=STOP_LOSS botId={} symbol={} side={} price={} stopLoss={}",
-                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getStopLossPrice());
+                log.warn("[EXIT] STOP_LOSS botId={} symbol={} side={} price={} SL={}",
+                        pos.getBotId(), pos.getSymbol(), pos.getSide(),
+                        currentPrice, pos.getStopLossPrice());
+
                 submitExitOrder(pos, "BOT_SL");
                 return;
             }
         }
 
-        // --- Take Profit ---
+        // ================= TAKE PROFIT =================
         if (pos.getTakeProfitPrice() != null) {
-            // LONG: TP triggers when price rises above target → currentPrice >= TP
-            // SHORT: TP triggers when price falls below target → currentPrice <= TP
+
             boolean tpTriggered = isShort
-                ? currentPrice.compareTo(pos.getTakeProfitPrice()) <= 0
-                : currentPrice.compareTo(pos.getTakeProfitPrice()) >= 0;
+                    ? currentPrice.compareTo(pos.getTakeProfitPrice()) <= 0
+                    : currentPrice.compareTo(pos.getTakeProfitPrice()) >= 0;
 
             if (tpTriggered) {
-                log.info("[POSITION_CLOSED] reason=TAKE_PROFIT botId={} symbol={} side={} price={} takeProfit={}",
-                    pos.getBotId(), pos.getSymbol(), pos.getSide(), currentPrice, pos.getTakeProfitPrice());
+                log.info("[EXIT] TAKE_PROFIT botId={} symbol={} side={} price={} TP={}",
+                        pos.getBotId(), pos.getSymbol(), pos.getSide(),
+                        currentPrice, pos.getTakeProfitPrice());
+
                 submitExitOrder(pos, "BOT_TP");
                 return;
             }
         }
 
-        // --- Trailing Stop ---
+        // ================= TRAILING STOP =================
         if (pos.getTrailingStopPercent() != null) {
+
             boolean triggered = trailingStopService.checkTrailingStop(
-                pos.getBotId(), currentPrice, pos.getEntryPrice(),
-                pos.getTrailingStopPercent().doubleValue());
+                    pos.getBotId(),
+                    currentPrice,
+                    pos.getEntryPrice(),
+                    pos.getTrailingStopPercent().doubleValue()
+            );
 
             if (triggered) {
                 BigDecimal hwm = trailingStopService.getHighWaterMark(pos.getBotId());
-                log.warn("[POSITION_CLOSED] reason=TRAILING_STOP botId={} symbol={} price={} hwm={} trailingPct={}%",
-                    pos.getBotId(), pos.getSymbol(), currentPrice, hwm, pos.getTrailingStopPercent());
+
+                log.warn("[EXIT] TRAILING_STOP botId={} symbol={} price={} HWM={} trailingPct={}",
+                        pos.getBotId(), pos.getSymbol(),
+                        currentPrice, hwm, pos.getTrailingStopPercent());
+
                 submitExitOrder(pos, "BOT_TRAILING_SL");
-                return;
             }
         }
     }
 
     private void submitExitOrder(TrackedPosition pos, String notificationType) {
-        // Mark position as exiting to prevent duplicate exit attempts
-        // Do NOT remove from tracker yet — only remove after successful execution
-        // to preserve tracking if the trade fails
-        positionTracker.removePosition(pos.getBotId());
 
-        // LONG positions exit with SELL, SHORT positions exit with BUY
+        // ❌ DO NOT remove immediately (bug in your version)
+        // ✅ Remove ONLY after success
+
         String exitSide = "SHORT".equalsIgnoreCase(pos.getSide()) ? "BUY" : "SELL";
 
         TradeRequest request = TradeRequest.builder()
-            .botId(pos.getBotId())
-            .userId(pos.getUserId())
-            .symbol(pos.getSymbol())
-            .side(exitSide)
-            .quantity(pos.getQuantity())
-            .orderType("MARKET")
-            .apiKey(pos.getApiKey())
-            .apiSecret(pos.getApiSecret())
-            .exchangeBaseUrl(pos.getExchangeBaseUrl())
-            .exchange(pos.getExchange())
-            .exchangeMode(pos.getExchangeMode())
-            .notificationType(notificationType)
-            .timestamp(Instant.now())
-            .build();
+                .botId(pos.getBotId())
+                .userId(pos.getUserId())
+                .symbol(pos.getSymbol())
+                .side(exitSide)
+                .quantity(pos.getQuantity())
+                .orderType("MARKET")
+                .apiKey(pos.getApiKey())
+                .apiSecret(pos.getApiSecret())
+                .exchangeBaseUrl(pos.getExchangeBaseUrl())
+                .exchange(pos.getExchange())
+                .exchangeMode(pos.getExchangeMode())
+                .notificationType(notificationType)
+                .timestamp(Instant.now())
+                .build();
 
         executionQueue.submitTrade(request);
 
-        // Re-register position if trade submission fails so it can be retried
         request.getResultFuture()
-            .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .thenAccept(result -> {
-                if (!result.isSuccess()) {
-                    log.error("[RISK_EXIT_FAILED] Re-registering position for botId={} symbol={} — trade failed: {}",
-                        pos.getBotId(), pos.getSymbol(), result.getErrorMessage());
-                    positionTracker.registerPosition(pos);
-                }
-            })
-            .exceptionally(ex -> {
-                log.error("[RISK_EXIT_TIMEOUT] Re-registering position for botId={} symbol={} — {}",
-                    pos.getBotId(), pos.getSymbol(), ex.getMessage());
-                positionTracker.registerPosition(pos);
-                return null;
-            });
+                .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .thenAccept(result -> {
 
-        log.info("[RISK_EXIT] Submitted SELL for botId={} symbol={} qty={} reason={}",
-            pos.getBotId(), pos.getSymbol(), pos.getQuantity(), notificationType);
+                    if (result.isSuccess()) {
+
+                        // ✅ REMOVE only after success
+                        positionTracker.removePosition(pos.getBotId());
+
+                        log.info("[EXIT_FILLED] botId={} symbol={} side={} price={}",
+                                pos.getBotId(),
+                                pos.getSymbol(),
+                                exitSide,
+                                result.getAvgPrice());
+
+                    } else {
+                        log.error("[EXIT_FAILED] botId={} symbol={} error={}",
+                                pos.getBotId(),
+                                pos.getSymbol(),
+                                result.getErrorMessage());
+                    }
+                })
+                .exceptionally(ex -> {
+                    log.error("[EXIT_TIMEOUT] botId={} symbol={} error={}",
+                            pos.getBotId(),
+                            pos.getSymbol(),
+                            ex.getMessage());
+                    return null;
+                });
+
+        log.info("[RISK_EXIT] Submitted {} for botId={} symbol={} qty={} reason={}",
+                exitSide,
+                pos.getBotId(),
+                pos.getSymbol(),
+                pos.getQuantity(),
+                notificationType);
     }
 }
