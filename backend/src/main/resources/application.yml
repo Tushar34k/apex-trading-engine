@@ -1,10 +1,19 @@
 spring:
+  # NOTE: spring.datasource.url/username/password are deliberately NOT set here.
+  # They are resolved at startup by DatabaseUrlEnvironmentPostProcessor from
+  # DATABASE_URL / SPRING_DATASOURCE_URL / DB_URL. Hard-coding a default like
+  # ${DB_URL:jdbc:postgresql://db:5432/tradeengine} here re-introduces the
+  # "bare hostname leaks into JDBC URL" failure mode on Render.
+  # For local dev, set DB_URL or DATABASE_URL in your shell or .env file.
   datasource:
-    url: ${DB_URL:jdbc:postgresql://db:5432/tradeengine}
-    username: ${DB_USER:postgres}
-    password: ${DB_PASSWORD:postgres}
     hikari:
       maximum-pool-size: 10
+    # Local-dev fallback ONLY (used when no env var is provided AND no
+    # profile-specific override exists). Render deploys always go through
+    # DATABASE_URL → PostProcessor and never hit this default.
+    url: ${LOCAL_DB_URL:jdbc:postgresql://db:5432/tradeengine}
+    username: ${LOCAL_DB_USER:postgres}
+    password: ${LOCAL_DB_PASSWORD:postgres}
 
   jpa:
     hibernate:
