@@ -1,0 +1,38 @@
+# Render profile.
+# Activated by setting SPRING_PROFILES_ACTIVE=render in the Render service env.
+#
+# Database credentials come from Render's DATABASE_URL env var (set automatically
+# when you "Link" the Render PostgreSQL instance to this service).
+# DatabaseUrlEnvironmentPostProcessor parses that URL and translates it into
+# spring.datasource.{url,username,password} BEFORE this file is read, so we
+# intentionally do NOT redefine spring.datasource.url here — overriding it
+# with ${DB_URL:...} would re-introduce the bug where a bare hostname like
+# "dpg-xxxx-a" leaks into the JDBC URL.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          lob:
+            non_contextual_creation: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  datasource:
+    hikari:
+      maximum-pool-size: 5
+      connection-timeout: 30000
+      initialization-fail-timeout: 60000
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    com.tradeengine: INFO
+    org.flywaydb: INFO
