@@ -102,6 +102,30 @@ public class PositionRiskValidator {
             return msg;
         }
 
+        // Aggregate open exposure cap (10% of equity by default).
+        // Sums notional of every tracked open position + this prospective order.
+        BigDecimal existingExposure = positionTracker.getAllPositions().stream()
+                .filter(p -> p.getEntryPrice() != null && p.getQuantity() != null)
+                .map(p -> p.getEntryPrice().multiply(p.getQuantity()).abs())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal projectedExposure = existingExposure.add(orderNotional);
+        BigDecimal maxAggregate = accountBalance
+                .multiply(BigDecimal.valueOf(maxAggregateExposurePercent))
+                .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+        if (projectedExposure.compareTo(maxAggregate) > 0) {
+            String msg = String.format(
+                "Aggregate exposure %s + new %s = %s exceeds %.1f%% of balance %s (max=%s) for %s:%s",
+                existingExposure.setScale(2, RoundingMode.HALF_UP),
+                orderNotional.setScale(2, RoundingMode.HALF_UP),
+                projectedExposure.setScale(2, RoundingMode.HALF_UP),
+                maxAggregateExposurePercent,
+                accountBalance.setScale(2, RoundingMode.HALF_UP),
+                maxAggregate.setScale(2, RoundingMode.HALF_UP),
+                exchange, symbol);
+            log.warn("[ORDER_REJECTED] reason=AGGREGATE_EXPOSURE_EXCEEDED {}", msg);
+            return msg;
+        }
+
         return null;
     }
 
