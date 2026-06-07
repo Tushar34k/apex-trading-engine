@@ -24,8 +24,14 @@ public class PositionRiskValidator {
     @Value("${risk.maxSingleTradePercent:2}")
     private double maxSingleTradePercent;
 
-    @Value("${risk.maxLeverage:5}")
+    @Value("${risk.maxLeverage:3}")
     private int maxLeverage;
+
+    /** Hard internal leverage ceiling — overrides exchange limits and DB config alike. */
+    public static final int HARD_LEVERAGE_CAP = 3;
+
+    @Value("${risk.maxAggregateExposurePercent:10}")
+    private double maxAggregateExposurePercent;
 
     @Value("${risk.liquidationSafetyPercent:5}")
     private double liquidationSafetyPercent;
