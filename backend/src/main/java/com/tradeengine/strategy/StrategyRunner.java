@@ -451,7 +451,12 @@ public class StrategyRunner {
         if (currentPrice.compareTo(BigDecimal.ZERO) <= 0) return;
 
         // ═══ STRICT RISK-BASED POSITION SIZING WITH CIRCUIT BREAKER ═══
-        double baseRiskPercent = getDoubleParam(params, "riskPercentPerTrade", 0.5); // 0.5% max risk
+        // Risk per trade is hard-capped at MAX_RISK_PCT (2%) regardless of bot config.
+        final double MAX_RISK_PCT = 2.0;
+        final double MAX_SINGLE_NOTIONAL_PCT = 0.02; // 2% of balance — single-trade notional ceiling
+        final double MAX_AGGREGATE_EXPOSURE_PCT = 0.10; // 10% of balance — sum of all open notionals
+
+        double baseRiskPercent = Math.min(MAX_RISK_PCT, getDoubleParam(params, "riskPercentPerTrade", 2.0));
         // Phase 5 — tier-aware sizing (FULL=1.0, HALF=0.5, QUARTER=0.25). Never INCREASES risk.
         double sizeMultiplier = getDoubleParam(params, "__sizeMultiplier", 1.0);
         sizeMultiplier = Math.max(0.0, Math.min(1.0, sizeMultiplier));
@@ -471,7 +476,6 @@ public class StrategyRunner {
         if (slDistance.compareTo(minSlDistance) < 0) {
             log.error("[SIZE_CAPPED] botId={} symbol={} SL distance {} < minimum {} (0.3%) — REJECTING to prevent oversized lot",
                 bot.getId(), exchangeSymbol, slDistance, minSlDistance);
-            // Record rejection in sizing audit
             Map<String, Object> rejectAudit = new LinkedHashMap<>();
             rejectAudit.put("timestamp", Instant.now().toString());
             rejectAudit.put("botId", bot.getId().toString());
@@ -488,8 +492,8 @@ public class StrategyRunner {
 
         BigDecimal riskBasedQty = riskAmount.divide(slDistance, 8, RoundingMode.DOWN);
 
-        // Hard cap 1: never exceed 5% of balance in notional value
-        BigDecimal maxAllocation = usdtBalance.multiply(BigDecimal.valueOf(0.05));
+        // Hard cap 1: single-trade notional ≤ 2% of balance
+        BigDecimal maxAllocation = usdtBalance.multiply(BigDecimal.valueOf(MAX_SINGLE_NOTIONAL_PCT));
         BigDecimal maxQty = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
         quantity = riskBasedQty.min(maxQty);
 
@@ -497,9 +501,35 @@ public class StrategyRunner {
         BigDecimal notionalValue = quantity.multiply(currentPrice);
         if (notionalValue.compareTo(maxAllocation) > 0) {
             quantity = maxAllocation.divide(currentPrice, 8, RoundingMode.DOWN);
-            log.warn("[SIZE_CAPPED] botId={} notional {} exceeded 5% cap {} — clamped qty to {}",
+            log.warn("[SIZE_CAPPED] botId={} notional {} exceeded {}% per-trade cap {} — clamped qty to {}",
                 bot.getId(), notionalValue.setScale(2, RoundingMode.HALF_UP),
+                MAX_SINGLE_NOTIONAL_PCT * 100,
                 maxAllocation.setScale(2, RoundingMode.HALF_UP), quantity);
+        }
+
+        // Hard cap 3: aggregate open exposure ≤ 10% of balance.
+        BigDecimal existingExposure = positionTracker.getAllPositions().stream()
+                .filter(p -> p.getEntryPrice() != null && p.getQuantity() != null)
+                .map(p -> p.getEntryPrice().multiply(p.getQuantity()).abs())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal maxAggregate = usdtBalance.multiply(BigDecimal.valueOf(MAX_AGGREGATE_EXPOSURE_PCT));
+        BigDecimal remainingBudget = maxAggregate.subtract(existingExposure);
+        if (remainingBudget.signum() <= 0) {
+            log.warn("[SIZE_REJECTED] botId={} symbol={} aggregate exposure {} already at/above {}% cap {} — skipping",
+                bot.getId(), exchangeSymbol,
+                existingExposure.setScale(2, RoundingMode.HALF_UP),
+                MAX_AGGREGATE_EXPOSURE_PCT * 100,
+                maxAggregate.setScale(2, RoundingMode.HALF_UP));
+            notificationService.notifyRiskBlocked(bot.getUserId().toString(), bot.getName(), bot.getSymbol(),
+                "Aggregate exposure cap reached: $" + existingExposure.setScale(2, RoundingMode.HALF_UP)
+                    + " / $" + maxAggregate.setScale(2, RoundingMode.HALF_UP));
+            return;
+        }
+        BigDecimal aggCapQty = remainingBudget.divide(currentPrice, 8, RoundingMode.DOWN);
+        if (quantity.compareTo(aggCapQty) > 0) {
+            log.warn("[SIZE_CAPPED] botId={} symbol={} clamped by aggregate exposure budget: {} -> {}",
+                bot.getId(), exchangeSymbol, quantity, aggCapQty);
+            quantity = aggCapQty;
         }
 
         // Hard cap 3: asset-specific sanity — reject absurdly large qty for high-value assets

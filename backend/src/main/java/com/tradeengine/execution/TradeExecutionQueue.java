@@ -234,8 +234,9 @@ public class TradeExecutionQueue {
                     BigDecimal checkPrice = normalized != null ? normalized.getPrice() : req.getPrice();
                     BigDecimal checkQty = normalized != null ? normalized.getQuantity() : req.getQuantity();
 
-                    // Fetch account balance from exchange for real risk validation
-                    BigDecimal accountBalance = null;
+                    // CRITICAL: always fetch LIVE balance from the exchange immediately before sizing/risk checks.
+                    // Per project rule: fail-fast on any exchange error — never proceed with stale/cached balance.
+                    BigDecimal accountBalance;
                     try {
                         ExchangeClient balanceClient = exchangeFactory.getClient(req.getExchange());
                         List<Balance> balances = balanceClient.getBalances(req.getApiKey(), req.getApiSecret(), req.getExchangeBaseUrl());
@@ -243,9 +244,32 @@ public class TradeExecutionQueue {
                             .filter(b -> "USDT".equalsIgnoreCase(b.getAsset()) || "USD".equalsIgnoreCase(b.getAsset()))
                             .map(Balance::getTotal)
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
-                        log.debug("[RISK_CHECK] exchange={} accountBalance={}", req.getExchange(), accountBalance);
+                        log.info("[RISK_CHECK] live balance fetched exchange={} balance={}", req.getExchange(), accountBalance);
                     } catch (Exception e) {
-                        log.warn("[RISK_CHECK] Failed to fetch balance for risk validation, skipping: {}", e.getMessage());
+                        pendingTrades.remove(req.getBotId());
+                        processedRequests.remove(req.getRequestId());
+                        String reason = "LIVE_BALANCE_FETCH_FAILED: " + e.getMessage();
+                        recordRejection(req.getBotId(), req.getSymbol(), reason);
+                        req.getResultFuture().complete(TradeRequest.TradeResult.builder()
+                            .success(false).errorMessage(reason).build());
+                        totalRejected.incrementAndGet();
+                        totalFailed.incrementAndGet();
+                        log.error("[ORDER_REJECTED] reason=LIVE_BALANCE_FETCH_FAILED botId={} symbol={} err={}",
+                            req.getBotId(), req.getSymbol(), e.getMessage());
+                        continue;
+                    }
+                    if (accountBalance == null || accountBalance.signum() <= 0) {
+                        pendingTrades.remove(req.getBotId());
+                        processedRequests.remove(req.getRequestId());
+                        String reason = "LIVE_BALANCE_ZERO_OR_NULL exchange=" + req.getExchange();
+                        recordRejection(req.getBotId(), req.getSymbol(), reason);
+                        req.getResultFuture().complete(TradeRequest.TradeResult.builder()
+                            .success(false).errorMessage(reason).build());
+                        totalRejected.incrementAndGet();
+                        totalFailed.incrementAndGet();
+                        log.error("[ORDER_REJECTED] reason=LIVE_BALANCE_ZERO botId={} symbol={}",
+                            req.getBotId(), req.getSymbol());
+                        continue;
                     }
 
                     String riskError = riskValidator.validatePositionSize(

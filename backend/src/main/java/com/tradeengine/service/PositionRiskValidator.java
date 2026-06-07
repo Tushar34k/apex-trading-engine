@@ -24,8 +24,14 @@ public class PositionRiskValidator {
     @Value("${risk.maxSingleTradePercent:2}")
     private double maxSingleTradePercent;
 
-    @Value("${risk.maxLeverage:5}")
+    @Value("${risk.maxLeverage:3}")
     private int maxLeverage;
+
+    /** Hard internal leverage ceiling — overrides exchange limits and DB config alike. */
+    public static final int HARD_LEVERAGE_CAP = 3;
+
+    @Value("${risk.maxAggregateExposurePercent:10}")
+    private double maxAggregateExposurePercent;
 
     @Value("${risk.liquidationSafetyPercent:5}")
     private double liquidationSafetyPercent;
@@ -96,6 +102,30 @@ public class PositionRiskValidator {
             return msg;
         }
 
+        // Aggregate open exposure cap (10% of equity by default).
+        // Sums notional of every tracked open position + this prospective order.
+        BigDecimal existingExposure = positionTracker.getAllPositions().stream()
+                .filter(p -> p.getEntryPrice() != null && p.getQuantity() != null)
+                .map(p -> p.getEntryPrice().multiply(p.getQuantity()).abs())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal projectedExposure = existingExposure.add(orderNotional);
+        BigDecimal maxAggregate = accountBalance
+                .multiply(BigDecimal.valueOf(maxAggregateExposurePercent))
+                .divide(BigDecimal.valueOf(100), 8, RoundingMode.HALF_UP);
+        if (projectedExposure.compareTo(maxAggregate) > 0) {
+            String msg = String.format(
+                "Aggregate exposure %s + new %s = %s exceeds %.1f%% of balance %s (max=%s) for %s:%s",
+                existingExposure.setScale(2, RoundingMode.HALF_UP),
+                orderNotional.setScale(2, RoundingMode.HALF_UP),
+                projectedExposure.setScale(2, RoundingMode.HALF_UP),
+                maxAggregateExposurePercent,
+                accountBalance.setScale(2, RoundingMode.HALF_UP),
+                maxAggregate.setScale(2, RoundingMode.HALF_UP),
+                exchange, symbol);
+            log.warn("[ORDER_REJECTED] reason=AGGREGATE_EXPOSURE_EXCEEDED {}", msg);
+            return msg;
+        }
+
         return null;
     }
 
@@ -105,10 +135,12 @@ public class PositionRiskValidator {
      * @return null if valid, or rejection reason string
      */
     public String validateLeverage(int requestedLeverage, String exchange, String symbol) {
-        if (requestedLeverage > maxLeverage) {
+        // Enforce hard internal cap regardless of configured/exchange max.
+        int effectiveMax = Math.min(maxLeverage, HARD_LEVERAGE_CAP);
+        if (requestedLeverage > effectiveMax) {
             String msg = String.format(
-                "Requested leverage %dx exceeds max allowed %dx for %s:%s",
-                requestedLeverage, maxLeverage, exchange, symbol);
+                "Requested leverage %dx exceeds internal cap %dx (configured=%dx, hardCap=%dx) for %s:%s",
+                requestedLeverage, effectiveMax, maxLeverage, HARD_LEVERAGE_CAP, exchange, symbol);
             log.warn("[ORDER_REJECTED] reason=MAX_LEVERAGE_EXCEEDED {}", msg);
             return msg;
         }
@@ -191,6 +223,8 @@ public class PositionRiskValidator {
     public void setMaxSingleTradePercent(double pct) { this.maxSingleTradePercent = pct; }
     public void setMaxLeverage(int lev) { this.maxLeverage = lev; }
     public void setLiquidationSafetyPercent(double pct) { this.liquidationSafetyPercent = pct; }
+    public void setMaxAggregateExposurePercent(double pct) { this.maxAggregateExposurePercent = pct; }
+    public double getMaxAggregateExposurePercent() { return maxAggregateExposurePercent; }
     public void setMaxGlobalOpenPositions(int max) { this.maxGlobalOpenPositions = max; }
     public int getMaxGlobalOpenPositions() { return maxGlobalOpenPositions; }
 }
