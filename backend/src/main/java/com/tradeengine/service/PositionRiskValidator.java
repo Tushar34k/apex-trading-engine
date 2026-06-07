@@ -135,10 +135,12 @@ public class PositionRiskValidator {
      * @return null if valid, or rejection reason string
      */
     public String validateLeverage(int requestedLeverage, String exchange, String symbol) {
-        if (requestedLeverage > maxLeverage) {
+        // Enforce hard internal cap regardless of configured/exchange max.
+        int effectiveMax = Math.min(maxLeverage, HARD_LEVERAGE_CAP);
+        if (requestedLeverage > effectiveMax) {
             String msg = String.format(
-                "Requested leverage %dx exceeds max allowed %dx for %s:%s",
-                requestedLeverage, maxLeverage, exchange, symbol);
+                "Requested leverage %dx exceeds internal cap %dx (configured=%dx, hardCap=%dx) for %s:%s",
+                requestedLeverage, effectiveMax, maxLeverage, HARD_LEVERAGE_CAP, exchange, symbol);
             log.warn("[ORDER_REJECTED] reason=MAX_LEVERAGE_EXCEEDED {}", msg);
             return msg;
         }
