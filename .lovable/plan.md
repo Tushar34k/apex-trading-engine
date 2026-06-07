@@ -1,117 +1,53 @@
+# Risk Management & Kill Switch Overhaul
 
+This is a large change set (27 items) touching trading-critical code. I'll group them into 5 phases so each can be reviewed and tested independently before moving on. Phases 1–2 are highest priority (real-money safety); 3–5 add edge and UX.
 
-# Production Upgrade Plan: Mock to Real Trading System
+## Phase 1 — Position sizing & exposure (items 1–4)
+- `RiskManagementService`: dynamic lot sizing from **live** balance fetched per order (no cache); risk 1–2% per trade (configurable, default 1%).
+- `PositionRiskValidator`: cap aggregate open notional at 10% of equity; reject + log when breached.
+- Hard internal leverage cap = 3x in `PositionRiskValidator.validateLeverage` (ignore exchange max).
+- New `BalanceService.fetchLive(botId)` bypassing cache, called from `TradeExecutionQueue` immediately pre-order.
 
-## Current State
+## Phase 2 — Kill switch redesign (items 5–11, 12–13)
+- Introduce `HaltMode { SOFT, HARD }` in `KillSwitchService`:
+  - SOFT = block new entries, allow position mgmt (SL/TP/trailing).
+  - HARD = full freeze (current behavior).
+- 60-second post-reset cooldown gate in `executionQueue.submit()`.
+- Auto-trigger only after **3 consecutive losses** (replace current single-failure path); 5-second debounce on auto-triggers.
+- Activation reason must include numeric context: `"3 losses in 47m, -4.3% DD"`.
+- Daily-loss 5% → HARD halt until UTC midnight (scheduled reset job).
+- Weekly DD 10% → HARD halt, bot marked `REQUIRES_REVIEW`.
+- Volatility-triggered SOFT halts auto-reset after 15 min (configurable toggle).
+- API: `POST /api/kill-switch/resume-soft` one-click resume for SOFT halts.
 
-Every page and component uses hardcoded inline arrays for data (positions, bots, strategies, trades, candles, risk rules, users, API keys, analytics). The TradingChart generates random candles. There is no API client, no authentication, no WebSocket client, and no TypeScript types matching the backend schema.
+## Phase 3 — Position management (items 14, 15, 21)
+- On entry, `PositionTracker` auto-attaches trailing stop = 1.5× ATR.
+- Monitor loop: when unrealized PnL ≥ +1%, move SL to entry (break-even).
+- Partial TP: close 50% at 1R, leave 50% with trailing stop.
 
-## Architecture Overview
+## Phase 4 — Entry quality (items 16–20, 22, 23)
+In `StrategyRunner` / `TradeQualityScorer`:
+- Hard reject RR < 2:1 (pre-entry calc using SL & TP).
+- Volume > 20-SMA filter.
+- Per-bot `trendFilterEnabled` setting: long only above 200 EMA, short only below.
+- 3-candle same-pair cooldown.
+- Session filter 13:00–17:00 UTC (per-bot toggle).
+- ATR-spike skip: current ATR > 3× ATR14-avg.
+- Step-down sizing: 0.5× after 2 consecutive losses; reset on win.
 
-```text
-React Frontend
-├── src/lib/api.ts              ← Axios/fetch client with JWT auth headers
-├── src/lib/ws.ts               ← WebSocket (STOMP/SockJS) client
-├── src/types/                  ← TypeScript DTOs matching backend schema
-├── src/contexts/AuthContext.tsx ← JWT auth state, login/logout/refresh
-├── src/hooks/api/              ← React Query hooks per domain
-├── src/pages/Login.tsx         ← Auth pages
-└── All existing pages          ← Refactored to use hooks instead of mock data
-```
+## Phase 5 — Dashboard & telemetry (items 24–27, plus 9)
+- Backend endpoint `/api/risk-monitor/dashboard` returning: daily P&L%, weekly DD%, remaining daily loss budget, current open exposure %, 7d/30d win rate, avg R:R, profit factor.
+- Extend `RejectionMetricsService` to capture every rejected order with reason → exposed via existing debug API + new UI panel.
+- New components: `RiskBudgetBar`, `PerformanceStats`, `RejectedOrdersFeed` on dashboard.
+- `KillSwitchModal`: show structured trigger reason; add "Resume — I've reviewed" button for SOFT halts.
 
-## Implementation Steps
+## Technical notes
+- Add migration `V5__add_halt_mode_and_review_flag.sql`: `bots.requires_review boolean`, `kill_switch_state` table (mode, reason, triggered_at, auto_reset_at).
+- All new thresholds live in DB-driven `risk_settings` (already pattern in codebase) — no hardcoded values, per memory rule.
+- Telemetry-first: every gate emits `RejectionMetricsService.record(...)` before returning.
+- Tests: extend `RiskCircuitBreakerTest`, `PositionSizingCircuitBreakerTest`, add `KillSwitchHaltModeTest`, `DrawdownProtectionTest`.
 
-### 1. TypeScript Types (`src/types/`)
-
-Create type definitions matching the backend schema: `User`, `ApiKey`, `Strategy`, `StrategyParameter`, `TradingBot`, `Order`, `Trade`, `TradeExplanation`, `RiskConfig`, `BacktestRun`, `BacktestTrade`, `Position`, `MarketData`, `CandleData`, plus WebSocket event types (`TradeOpenedEvent`, `TradeClosedEvent`, `StopLossTriggeredEvent`, `TakeProfitTriggeredEvent`, `PositionUpdate`, `PriceUpdate`).
-
-### 2. API Client (`src/lib/api.ts`)
-
-- Configurable base URL via `VITE_API_URL` env var
-- JWT bearer token injection from auth context
-- Automatic token refresh on 401
-- Request/response interceptors for error handling
-- Typed methods for all 30+ REST endpoints from the backend architecture doc
-
-### 3. WebSocket Client (`src/lib/ws.ts`)
-
-- STOMP over SockJS connection to `/ws`
-- Auto-reconnect with exponential backoff
-- Subscribe helpers for `/topic/market/{symbol}`, `/user/topic/positions`, `/user/topic/orders`, `/topic/notifications`
-- React hook `useWebSocket` exposing connection state and subscribe/unsubscribe
-
-### 4. Auth Context (`src/contexts/AuthContext.tsx`)
-
-- Login/register/logout/refresh token flows
-- Store JWT in memory (not localStorage per security requirements)
-- `AuthProvider` wrapping the app
-- `useAuth` hook exposing user, role, loading state
-- Protected route wrapper redirecting unauthenticated users to `/login`
-
-### 5. Login and Register Pages
-
-- `/login` and `/register` routes outside AppLayout
-- Form validation with zod + react-hook-form
-- Role display in TopBar user avatar area
-
-### 6. React Query Hooks (`src/hooks/api/`)
-
-One hook file per domain, replacing all inline mock data:
-- `useBots`, `useStartBot`, `useStopBot`, `useCreateBot`
-- `useStrategies`, `useStrategyParams`, `useUpdateStrategyParams`
-- `usePositions`, `useOrders`, `useTrades`, `useTradeDetail`
-- `useRiskConfig`, `useUpdateRiskConfig`, `useRiskStatus`, `useExposure`
-- `useBacktestRun`, `useBacktestResults`, `useBacktestTrades`
-- `useApiKeys`, `useAddApiKey`, `useDeleteApiKey`
-- `useAnalytics`, `useEquityCurve`, `useMonthlyReturns`
-- `useAdminUsers`, `useKillSwitch`, `useSystemHealth`
-- `useBalances`
-
-### 7. Component Refactors (all mock data removed)
-
-| Component | Change |
-|---|---|
-| `TradingChart` | Fetch candles from API (`getCandles`), subscribe to WebSocket for live updates, render real trade markers from `useTrades` |
-| `PositionsTable` | Use `usePositions` hook, live updates via WS |
-| `ActiveBots` | Use `useBots` hook, start/stop actions call API |
-| `EquityCurve` | Use `useEquityCurve` hook |
-| `TopBar` | Show real connection status, real BTC/ETH prices from WS, real active bot count, user initials from auth |
-| `Index` (Dashboard) | All StatCards driven by `useAnalytics` + `useRiskStatus` |
-| `Strategies` | `useStrategies` hook, settings button opens param editor dialog calling `useUpdateStrategyParams` |
-| `RiskControl` | `useRiskConfig` + `useRiskStatus` + `useExposure`, editable config fields |
-| `Portfolio` | `useBalances` + `usePositions` + `useMonthlyReturns` |
-| `Backtesting` | `useBacktestResults`, "Run Backtest" button calls `useBacktestRun` mutation with form inputs |
-| `PaperTrading` | `useTrades` filtered by mode=PAPER |
-| `Analytics` | `useAnalytics` + `useMonthlyReturns` + strategy comparison from API |
-| `ApiKeys` | `useApiKeys`, add/delete mutations, test endpoint call |
-| `Admin` | `useAdminUsers`, `useSystemHealth`, `useKillSwitch` mutation |
-
-### 8. Trade Explanation Panel
-
-- New `TradeDetailDialog` component
-- Clicking a trade row opens dialog showing: strategy name/version, market regime, indicator snapshot (JSON rendered as key-value), risk settings, entry/exit reasons
-- Data from `useTradeDetail(tradeId)` which calls `GET /api/trades/{id}`
-
-### 9. Updated Backend Architecture Docs
-
-- Add WebSocket event payload schemas
-- Add reconciliation job spec
-- Add trailing stop and partial close to execution engine
-- Add refresh token endpoint details
-- Add rate limiting config
-- Add Viewer role to auth
-
-### 10. Environment Configuration
-
-- Add `.env.example` with `VITE_API_URL` and `VITE_WS_URL`
-- Document connection setup in README
-
-## File Count
-
-~15 new files, ~12 modified files. No mock data remains anywhere in the codebase.
-
-## Constraints
-
-- The frontend cannot execute backend logic (order placement, risk validation, strategy evaluation). All business logic runs on the Spring Boot backend.
-- This plan builds the complete frontend integration layer. The backend must be running and accessible for the app to function.
-
+## Confirm before I start
+1. Default per-trade risk: **1%** or **2%**? (I'll use 1%, configurable.)
+2. Session filter (item 20) and trend filter (item 18) — apply globally or per-bot toggle defaulting OFF? (I'll do per-bot, default OFF, so existing bots aren't suddenly silenced.)
+3. OK to proceed phase-by-phase, shipping Phase 1 first and pausing for your review before Phase 2?
