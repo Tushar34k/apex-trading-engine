@@ -223,6 +223,8 @@ public class PositionRiskValidator {
     public void setMaxSingleTradePercent(double pct) { this.maxSingleTradePercent = pct; }
     public void setMaxLeverage(int lev) { this.maxLeverage = lev; }
     public void setLiquidationSafetyPercent(double pct) { this.liquidationSafetyPercent = pct; }
+    public void setMaxAggregateExposurePercent(double pct) { this.maxAggregateExposurePercent = pct; }
+    public double getMaxAggregateExposurePercent() { return maxAggregateExposurePercent; }
     public void setMaxGlobalOpenPositions(int max) { this.maxGlobalOpenPositions = max; }
     public int getMaxGlobalOpenPositions() { return maxGlobalOpenPositions; }
 }
